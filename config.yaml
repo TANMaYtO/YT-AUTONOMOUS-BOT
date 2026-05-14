@@ -1,0 +1,130 @@
+# ============================================================
+# YT Shorts Agent — Configuration
+# ============================================================
+
+pipeline:
+  videos_per_day: 3
+  generation_time: "01:00"       # When daily generation runs
+  upload_slots:
+    - "09:00"
+    - "15:00"
+    - "20:00"
+
+characters:
+  - name: "Nobita"
+    show: "Doraemon"
+    role: "confused"
+    voice: "en-US-SteffanNeural"
+    image_folder: "assets/characters/Nobita/"
+  - name: "Doraemon"
+    show: "Doraemon"
+    role: "explainer"
+    voice: "en-GB-ThomasNeural"
+    image_folder: "assets/characters/Doraemon/"
+  - name: "Light Yagami"
+    show: "Death Note"
+    role: "explainer"
+    voice: "en-GB-RyanNeural"
+    image_folder: "assets/characters/LightYagami/"
+  - name: "Gojo"
+    show: "Jujutsu Kaisen"
+    role: "explainer"
+    voice: "en-US-AndrewMultilingualNeural"
+    image_folder: "assets/characters/Gojo/"
+  - name: "Luffy"
+    show: "One Piece"
+    role: "confused"
+    voice: "en-AU-WilliamMultilingualNeural"
+    image_folder: "assets/characters/Luffy/"
+
+topics:
+  - "What is an API?"
+  - "How does recursion work?"
+  - "What is machine learning?"
+  - "How does the internet work?"
+  - "What is a database?"
+  - "Explain Big O notation"
+  - "What is Git and why does it matter?"
+  - "How does a CPU work?"
+  - "What is an operating system?"
+  - "How does HTTPS work?"
+  - "What is a neural network?"
+  - "What is cloud computing?"
+  - "How does DNS work?"
+  - "What is an algorithm?"
+  - "What is RAM vs storage?"
+  - "How do APIs authenticate users?"
+  - "What is a compiler?"
+  - "What is Docker?"
+  - "What is a REST API?"
+  - "How does a search engine work?"
+  - "What is binary code?"
+  - "What is open source software?"
+  - "How does Bluetooth work?"
+  - "What is a programming language?"
+  - "What is the difference between frontend and backend?"
+  - "What is object-oriented programming?"
+  - "How does Wi-Fi work?"
+  - "What is version control?"
+  - "What is a hash function?"
+  - "What is encryption?"
+  - "What is a firewall?"
+  - "How does GPS work?"
+  - "What is a microprocessor?"
+  - "What is serverless computing?"
+  - "What is the difference between AI and ML?"
+  - "How does a compiler differ from an interpreter?"
+  - "What is a VPN?"
+  - "What is latency?"
+  - "What is a load balancer?"
+  - "What is a cache?"
+  - "What is asynchronous programming?"
+  - "How does garbage collection work?"
+  - "What is a race condition?"
+  - "What is multithreading?"
+  - "What is an IP address?"
+  - "How does email actually work?"
+  - "What is a token in AI?"
+  - "What is overfitting in ML?"
+  - "What is the difference between TCP and UDP?"
+  - "What is a deadlock?"
+
+video:
+  resolution_width: 1080
+  resolution_height: 1920
+  fps: 30
+  target_duration_sec: 45
+  background_music_volume_db: -20
+
+subtitle:
+  font: "Arial"
+  font_size: 72
+  primary_color: "&H00FFFF00"     # Yellow
+  outline_color: "&H00000000"     # Black
+  outline_width: 3
+  bold: 1
+  alignment: 5                    # Middle centre
+  margin_v: 0                      # No vertical margin (centred)
+  words_per_chunk: 1
+
+paths:
+  backgrounds: "assets/backgrounds/"
+  music: "assets/music/"
+  temp: "assets/temp/"
+  output: "output/"
+  archive: "archive/"
+  logs: "logs/"
+  characters: "assets/characters/"
+  queue: "queue.json"
+  history: "history.json"
+  credentials: "credentials/"
+
+ffmpeg:
+  libass_check: true             # Hard-fail at startup if missing
+  intermediate_codec: "libx264"
+  final_codec: "libx264"
+  audio_codec: "aac"
+
+health_checks:
+  min_free_disk_gb: 2
+  oauth_warning_days: 2          # Alert when token expires within 2 days

@@ -1,0 +1,43 @@
+# yt-shorts-agent requirements
+# Phase 1: Core dependencies
+
+# State & validation
+pydantic>=2.0,<3.0
+typing_extensions>=4.5
+
+# TTS (Phase 1)
+edge-tts>=6.1
+
+# Config & environment
+python-dotenv>=1.0
+pyyaml>=6.0
+
+# Retry logic
+tenacity>=8.2
+
+# File locking (queue.json safety)
+filelock>=3.12
+
+# Logging
+colorlog>=6.7
+
+# LangGraph (Phase 4, but install early to validate schema)
+langgraph>=0.2
+
+# Gemini Flash API (Phase 2: script + metadata generation)
+google-genai>=1.0
+
+# HTTP client (for Pollinations, Telegram alerts)
+httpx>=0.27
+
+# Background removal (character images)
+rembg>=2.0
+Pillow>=10.0
+
+# YouTube upload (Phase 5)
+google-auth>=2.0
+google-auth-oauthlib>=1.0
+google-api-python-client>=2.0
+
+# Trends (Phase 6)
+pytrends>=4.9

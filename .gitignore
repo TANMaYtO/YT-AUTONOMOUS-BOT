@@ -1,0 +1,69 @@
+# ============================================================
+# YT Shorts Agent — .gitignore
+# ============================================================
+
+# --- Secrets (NEVER commit) ---
+.env
+credentials/
+!credentials/.gitkeep
+
+# --- Generated content ---
+output/*
+!output/.gitkeep
+archive/*
+!archive/.gitkeep
+
+# --- Runtime data ---
+assets/temp/*
+!assets/temp/.gitkeep
+assets/characters/*
+!assets/characters/.gitkeep
+assets/backgrounds/*
+!assets/backgrounds/.gitkeep
+assets/music/*
+!assets/music/.gitkeep
+history.json
+queue.json
+
+# --- Logs ---
+logs/*
+!logs/.gitkeep
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# --- Virtual environment ---
+venv/
+.venv/
+env/
+
+# --- Gemini agent config (local dev tooling) ---
+.agents/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+
+# --- OS ---
+Thumbs.db
+.DS_Store
+Desktop.ini
+ehthumbs.db
+
+# --- Debug / scratch scripts ---
+scripts/debug_gemini.py
+
+# --- One-off test scripts (not part of core) ---
+/test_*.py
+/list_voices.py
