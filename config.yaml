@@ -9,32 +9,34 @@ pipeline:
     - "09:00"
     - "15:00"
     - "20:00"
+  tts_engine: "kokoro"
+  tts_speed: 1.0
 
 characters:
   - name: "Nobita"
     show: "Doraemon"
     role: "confused"
-    voice: "en-US-SteffanNeural"
+    voice: "am_puck"
     image_folder: "assets/characters/Nobita/"
   - name: "Doraemon"
     show: "Doraemon"
     role: "explainer"
-    voice: "en-GB-ThomasNeural"
+    voice: "bm_george"
     image_folder: "assets/characters/Doraemon/"
   - name: "Light Yagami"
     show: "Death Note"
     role: "explainer"
-    voice: "en-GB-RyanNeural"
+    voice: "bm_lewis"
     image_folder: "assets/characters/LightYagami/"
   - name: "Gojo"
     show: "Jujutsu Kaisen"
     role: "explainer"
-    voice: "en-US-AndrewMultilingualNeural"
+    voice: "am_fenrir"
     image_folder: "assets/characters/Gojo/"
   - name: "Luffy"
     show: "One Piece"
     role: "confused"
-    voice: "en-AU-WilliamMultilingualNeural"
+    voice: "am_michael"
     image_folder: "assets/characters/Luffy/"
 
 topics:
@@ -118,6 +120,8 @@ paths:
   queue: "queue.json"
   history: "history.json"
   credentials: "credentials/"
+  kokoro_model: "models/kokoro/kokoro-v1.0.onnx"
+  kokoro_voices: "models/kokoro/voices-v1.0.bin"
 
 ffmpeg:
   libass_check: true             # Hard-fail at startup if missing

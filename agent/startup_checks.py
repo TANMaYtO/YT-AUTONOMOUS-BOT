@@ -117,8 +117,6 @@ def check_env_variables() -> None:
 
     required_keys: list[str] = [
         "GEMINI_API_KEY",
-        "TELEGRAM_BOT_TOKEN",
-        "TELEGRAM_CHAT_ID",
     ]
 
     missing: list[str] = []
@@ -133,6 +131,13 @@ def check_env_variables() -> None:
             f"Missing required environment variables: {joined}\n"
             f"Set them in your .env file (see .env.template)."
         )
+
+    # Optional Telegram keys
+    telegram_keys = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
+    telegram_missing = [k for k in telegram_keys if not os.environ.get(k, "").strip()]
+    
+    if telegram_missing:
+        logger.warning("Telegram not configured — failure alerts disabled")
 
 
 def check_credentials_exist() -> None:
@@ -175,6 +180,27 @@ def check_credentials_exist() -> None:
         logger.debug(f"OAuth token found: {token_path}")
 
 
+async def check_kokoro_models(config: dict[str, Any]) -> None:
+    """Verify Kokoro model files exist and are correct size."""
+    onnx_path = Path(config["paths"]["kokoro_model"])
+    voices_path = Path(config["paths"]["kokoro_voices"])
+    
+    if not onnx_path.exists():
+        raise RuntimeError(
+            f"Kokoro ONNX model not found at {onnx_path}\n"
+            "Download from: github.com/thewh1teagle/kokoro-onnx/releases"
+        )
+    if onnx_path.stat().st_size < 100_000_000:  # < 100MB
+        raise RuntimeError(
+            f"Kokoro model file appears corrupted "
+            f"(size: {onnx_path.stat().st_size:,} bytes)"
+        )
+    if not voices_path.exists():
+        raise RuntimeError(
+            f"Kokoro voices file not found at {voices_path}"
+        )
+
+
 async def run_all_checks(config: dict[str, Any]) -> bool:
     """Execute all startup checks in sequence.
 
@@ -190,6 +216,12 @@ async def run_all_checks(config: dict[str, Any]) -> bool:
         {
             "name": "FFmpeg + libass",
             "fn": lambda: check_ffmpeg_libass(),
+            "critical": True,
+            "is_async": True,
+        },
+        {
+            "name": "Kokoro models",
+            "fn": lambda: check_kokoro_models(config),
             "critical": True,
             "is_async": True,
         },

@@ -1,348 +1,253 @@
-"""Node 4 — Asset Fetcher (TTS audio generation).
+"""Node 4 — Asset Fetcher.
 
-Generates all audio assets needed for video assembly using edge-tts.
+Generates TTS audio via Kokoro-ONNX and extracts word-level timestamps 
+via OpenAI Whisper (tiny). Replaces Edge-TTS.
 
-!! CRITICAL WARNING — edge-tts 7.x WordBoundary Bug !!
-edge-tts 7.x defaults boundary parameter to "SentenceBoundary".
-This gives ONLY sentence-level timestamps — one timestamp per
-entire line. Subtitle timing will be completely wrong if you
-don't pass boundary="WordBoundary" explicitly.
-
-Verified 2026-04-25 on edge-tts 7.2.8.
-!! END WARNING !!
-
-Pipeline:
-    1. For each script line: edge-tts → MP3 → immediate WAV convert
-    2. Collect word-boundary timestamps from each line
-    3. Calculate cumulative offsets across all lines
-    4. Concatenate all WAVs into full_audio.wav via FFmpeg concat
-    5. Validate full_audio.wav with ffprobe
-
-All edge-tts calls wrapped in tenacity (3 attempts, exp backoff).
-WAV used for all intermediate audio — never accumulate MP3s.
+Writes to state:
+    audio_segments, full_audio_path, full_audio_duration_ms
 """
 
 import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
-import edge_tts
+import soundfile as sf
+import whisper
+from kokoro_onnx import Kokoro
 from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
-    wait_exponential,
+    wait_fixed,
     before_sleep_log,
 )
 
+from agent.config import load_config
 from agent.models import AudioSegment, WordTimestamp
 from agent.state import validate_state_for_node
-from agent.utils import (
-    find_ffmpeg,
-    probe_media,
-    run_ffmpeg,
-)
 
 logger = logging.getLogger(__name__)
+config = load_config()
 
-# edge-tts returns offsets in 100-nanosecond ticks (Microsoft units).
-# Divide by 10_000 to convert to milliseconds.
-_TICKS_TO_MS: float = 10_000.0
+# Module-level model initialisation (run once)
+_KOKORO = None
+_WHISPER = None
+
+
+def _get_kokoro() -> Kokoro:
+    global _KOKORO
+    if _KOKORO is None:
+        logger.info("[asset_fetcher] Loading Kokoro ONNX model...")
+        _KOKORO = Kokoro(
+            config["paths"]["kokoro_model"],
+            config["paths"]["kokoro_voices"]
+        )
+    return _KOKORO
+
+
+def _get_whisper():
+    global _WHISPER
+    if _WHISPER is None:
+        logger.info("[asset_fetcher] Loading Whisper tiny model...")
+        _WHISPER = whisper.load_model("tiny")
+    return _WHISPER
 
 
 @retry(
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=2, min=2, max=8),
-    retry=retry_if_exception_type((
-        ConnectionError,
-        TimeoutError,
-        OSError,
-        RuntimeError,
-    )),
+    wait=wait_fixed(5),
+    retry=retry_if_exception_type((RuntimeError, OSError, ValueError)),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-async def generate_audio_for_line(
+async def _generate_line_audio(
     line_text: str,
-    voice: str,
-    output_dir: Path,
-    line_index: int,
-) -> AudioSegment:
-    """Generate TTS audio + word timestamps for a single script line.
+    voice_name: str,
+    output_wav_path: str,
+) -> tuple[float, list[dict]]:
+    """Generate audio via Kokoro and extract timestamps via Whisper."""
+    loop = asyncio.get_event_loop()
+    kokoro = _get_kokoro()
+    whisper_model = _get_whisper()
+    
+    speed = config["pipeline"].get("tts_speed", 1.0)
 
-    Args:
-        line_text: The dialogue text to synthesise.
-        voice: edge-tts voice ID (e.g. 'en-US-GuyNeural').
-        output_dir: Directory to save audio files.
-        line_index: Index of this line in the script (for filenames).
-
-    Returns:
-        Validated AudioSegment Pydantic model.
-
-    Raises:
-        RuntimeError: If audio generation or WAV conversion fails.
-    """
-    start_time = time.perf_counter()
-    logger.info(
-        f"[asset_fetcher] Generating audio for line {line_index}: "
-        f"'{line_text[:50]}...' voice={voice}"
+    # 1. Generate audio with Kokoro (CPU-bound)
+    samples, sample_rate = await loop.run_in_executor(
+        None,
+        lambda: kokoro.create(
+            text=line_text,
+            voice=voice_name,
+            speed=speed,
+            lang="en-us"
+        )
     )
 
-    mp3_path = output_dir / f"line_{line_index:02d}.mp3"
-    wav_path = output_dir / f"line_{line_index:02d}.wav"
+    # 2. Save directly to WAV
+    sf.write(output_wav_path, samples, sample_rate)
+    duration_ms = (len(samples) / sample_rate) * 1000
 
-    # --- Generate audio with edge-tts ---
-
-    # CRITICAL: must pass boundary="WordBoundary" explicitly.
-    # edge-tts 7.x defaults to SentenceBoundary which gives
-    # line-level timestamps only — subtitle timing will be wrong.
-    # Verified 2026-04-25 on edge-tts 7.2.8.
-    comm = edge_tts.Communicate(
-        line_text, voice, boundary="WordBoundary"
+    # 3. Transcribe with Whisper for word timestamps
+    result = await loop.run_in_executor(
+        None,
+        lambda: whisper_model.transcribe(
+            output_wav_path,
+            word_timestamps=True,
+            language="en"
+        )
     )
 
-    audio_data = bytearray()
-    word_boundaries: list[dict[str, float | str]] = []
-
-    async for chunk in comm.stream():
-        if chunk["type"] == "audio":
-            audio_data.extend(chunk["data"])
-        elif chunk["type"] == "WordBoundary":
-            word_boundaries.append({
-                "word": chunk.get("text", ""),
-                "offset_ms": chunk.get("offset", 0) / _TICKS_TO_MS,
-                "duration_ms": chunk.get("duration", 0) / _TICKS_TO_MS,
+    # 4. Extract and validate word timestamps
+    word_timestamps = []
+    for segment in result["segments"]:
+        for word_data in segment.get("words", []):
+            start_ms = word_data["start"] * 1000
+            end_ms = word_data["end"] * 1000
+            dur_ms = end_ms - start_ms
+            
+            # Ensure negative durations are clamped
+            if dur_ms < 50:
+                dur_ms = 50
+                
+            word_timestamps.append({
+                "word": word_data["word"].strip(),
+                "offset_ms": start_ms,
+                "duration_ms": dur_ms
             })
 
-    if not audio_data:
-        raise RuntimeError(
-            f"edge-tts returned no audio for line {line_index}: "
-            f"'{line_text}'"
+    # Fallback if whisper returned 0 words
+    if not word_timestamps:
+        words = line_text.split()
+        if words:
+            logger.warning(f"[asset_fetcher] Whisper found 0 words for line, using fallback. Text: {line_text}")
+            chunk_duration = duration_ms / len(words)
+            for i, word in enumerate(words):
+                word_timestamps.append({
+                    "word": word,
+                    "offset_ms": i * chunk_duration,
+                    "duration_ms": chunk_duration
+                })
+
+    if word_timestamps:
+        logger.info(
+            f"[asset_fetcher] Found {len(word_timestamps)} words. "
+            f"First: '{word_timestamps[0]['word']}' ({word_timestamps[0]['offset_ms']:.0f}ms), "
+            f"Last: '{word_timestamps[-1]['word']}' ({word_timestamps[-1]['offset_ms']:.0f}ms)"
         )
 
-    # Save raw MP3
-    mp3_path.write_bytes(audio_data)
-    logger.debug(
-        f"[asset_fetcher] Line {line_index}: MP3 saved "
-        f"({len(audio_data)} bytes), {len(word_boundaries)} word boundaries"
-    )
-
-    # --- Convert MP3 → WAV immediately (avoid frame-boundary gaps) ---
-    ffmpeg = find_ffmpeg()
-    await run_ffmpeg(
-        [
-            ffmpeg, "-i", str(mp3_path),
-            "-acodec", "pcm_s16le",
-            "-ar", "24000",
-            "-ac", "1",
-            "-y", str(wav_path),
-        ],
-        description=f"MP3→WAV line {line_index}",
-    )
-
-    # Delete MP3 — WAV is our intermediate format
-    mp3_path.unlink(missing_ok=True)
-
-    # --- Validate WAV output ---
-    if not wav_path.exists():
-        raise RuntimeError(
-            f"WAV file not created for line {line_index}: {wav_path}"
-        )
-
-    wav_size = wav_path.stat().st_size
-    if wav_size == 0:
-        raise RuntimeError(
-            f"WAV file is 0 bytes for line {line_index}: {wav_path}"
-        )
-
-    # Get duration from ffprobe
-    probe = await probe_media(wav_path)
-    duration_ms = float(probe["format"]["duration"]) * 1000.0
-
-    # --- Build validated Pydantic model ---
-    word_ts = [
-        WordTimestamp(
-            word=str(wb["word"]),
-            offset_ms=float(wb["offset_ms"]),
-            duration_ms=float(wb["duration_ms"]),
-        )
-        for wb in word_boundaries
-    ]
-
-    segment = AudioSegment(
-        path=str(wav_path.resolve()),
-        duration_ms=duration_ms,
-        character="",  # Filled by caller
-        line_index=line_index,
-        word_timestamps=word_ts,
-    )
-
-    elapsed = (time.perf_counter() - start_time) * 1000
-    logger.info(
-        f"[asset_fetcher] Line {line_index} complete: "
-        f"{duration_ms:.0f}ms audio, {len(word_ts)} words, "
-        f"took {elapsed:.0f}ms"
-    )
-
-    return segment
+    return duration_ms, word_timestamps
 
 
 async def generate_all_audio(
     state: dict[str, Any],
     voice_map: dict[str, str],
-    output_dir: Path,
+    temp_dir: Path,
 ) -> dict[str, Any]:
-    """Generate TTS audio for all script lines and concatenate.
-
-    Args:
-        state: Current pipeline state (must have 'script' populated).
-        voice_map: Maps character name → edge-tts voice ID.
-        output_dir: Directory for all audio files.
-
-    Returns:
-        Updated state dict with audio_segments, full_audio_path,
-        and full_audio_duration_ms populated.
-    """
+    """Node 4: Generate audio for the script."""
     logger.info("[asset_fetcher] Starting audio generation")
-    start_time = time.perf_counter()
-
-    # --- Validate upstream state ---
+    
     if state.get("error"):
-        logger.warning("[asset_fetcher] Upstream error detected, skipping")
         return state
 
-    script = state.get("script", [])
-    if not script:
+    validation_error = validate_state_for_node(state, "asset_fetcher")
+    if validation_error:
+        logger.error(f"[asset_fetcher] {validation_error}")
+        return {**state, "error": validation_error, "failed_node": "asset_fetcher"}
+
+    try:
+        script = state["script"]
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        audio_segments: List[AudioSegment] = []
+        filelist_path = temp_dir / "filelist.txt"
+        
+        start_time = time.perf_counter()
+        
+        cumulative_offset_ms = 0.0
+        
+        with open(filelist_path, "w", encoding="utf-8") as flist:
+            for i, line in enumerate(script):
+                char_name = line["character"]
+                voice = voice_map.get(char_name, "am_puck")  # Fallback to default if missing
+                
+                logger.info(
+                    f"[asset_fetcher] Generating audio for line {i}: "
+                    f"'{line['line'][:50]}...' voice={voice}"
+                )
+                
+                wav_path = temp_dir / f"line_{i:02d}.wav"
+                
+                line_start = time.perf_counter()
+                
+                duration_ms, raw_word_timestamps = await _generate_line_audio(
+                    line_text=line["line"],
+                    voice_name=voice,
+                    output_wav_path=str(wav_path)
+                )
+
+                # Add cumulative offset to word timestamps
+                for wt in raw_word_timestamps:
+                    wt["offset_ms"] += cumulative_offset_ms
+
+                word_objs = [WordTimestamp(**wt) for wt in raw_word_timestamps]
+                
+                seg = AudioSegment(
+                    path=str(wav_path),
+                    duration_ms=duration_ms,
+                    character=char_name,
+                    line_index=i,
+                    word_timestamps=word_objs
+                )
+                audio_segments.append(seg)
+                
+                flist.write(f"file '{wav_path.name}'\n")
+                
+                cumulative_offset_ms += duration_ms
+                
+                line_elapsed = (time.perf_counter() - line_start) * 1000
+                logger.info(
+                    f"[asset_fetcher] Line {i} complete: {duration_ms:.0f}ms audio, "
+                    f"{len(word_objs)} words, took {line_elapsed:.0f}ms"
+                )
+
+        total_audio_ms = sum(seg.duration_ms for seg in audio_segments)
+        logger.info(
+            f"[asset_fetcher] All {len(script)} lines generated. "
+            f"Total duration: {total_audio_ms:.0f}ms ({total_audio_ms/1000:.1f}s)"
+        )
+
+        full_audio_path = temp_dir / "full_audio.wav"
+        concat_cmd = (
+            f'ffmpeg -f concat -safe 0 -i "{filelist_path}" '
+            f'-c copy -y "{full_audio_path}"'
+        )
+        logger.info(f"[WAV concatenation] Running: {concat_cmd}")
+        
+        proc = await asyncio.create_subprocess_shell(
+            concat_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc.communicate()
+        
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg concatenation failed with code {proc.returncode}")
+
+        elapsed = (time.perf_counter() - start_time) * 1000
+        logger.info(
+            f"[asset_fetcher] Audio pipeline complete: {total_audio_ms:.0f}ms total, "
+            f"{len(audio_segments)} segments, took {elapsed:.0f}ms"
+        )
+
         return {
             **state,
-            "error": "No script lines in state",
-            "failed_node": "asset_fetcher",
+            "audio_segments": [seg.model_dump() for seg in audio_segments],
+            "full_audio_path": str(full_audio_path),
+            "full_audio_duration_ms": total_audio_ms
         }
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # --- Generate audio for each line ---
-    segments: list[AudioSegment] = []
-
-    for i, line_data in enumerate(script):
-        character = line_data["character"]
-        text = line_data["line"]
-        voice = voice_map.get(character, "en-US-GuyNeural")
-
-        try:
-            segment = await generate_audio_for_line(
-                line_text=text,
-                voice=voice,
-                output_dir=output_dir,
-                line_index=i,
-            )
-            # Fill in the character name
-            segment = segment.model_copy(update={"character": character})
-            segments.append(segment)
-
-        except Exception as e:
-            logger.error(
-                f"[asset_fetcher] Failed on line {i}: {e}"
-            )
-            return {
-                **state,
-                "error": f"Audio generation failed on line {i}: {e}",
-                "failed_node": "asset_fetcher",
-            }
-
-    # --- Calculate cumulative offsets across lines ---
-    # Each line's timestamps are relative to that line's start.
-    # We need absolute offsets for the concatenated audio.
-    cumulative_offset_ms: float = 0.0
-    adjusted_segments: list[dict[str, Any]] = []
-
-    for seg in segments:
-        adjusted_words = []
-        for wt in seg.word_timestamps:
-            adjusted_words.append({
-                "word": wt.word,
-                "offset_ms": wt.offset_ms + cumulative_offset_ms,
-                "duration_ms": wt.duration_ms,
-            })
-
-        adjusted_segments.append({
-            "path": seg.path,
-            "duration_ms": seg.duration_ms,
-            "character": seg.character,
-            "line_index": seg.line_index,
-            "word_timestamps": adjusted_words,
-        })
-
-        cumulative_offset_ms += seg.duration_ms
-
-    logger.info(
-        f"[asset_fetcher] All {len(segments)} lines generated. "
-        f"Total duration: {cumulative_offset_ms:.0f}ms "
-        f"({cumulative_offset_ms / 1000:.1f}s)"
-    )
-
-    # --- Concatenate WAVs via FFmpeg concat demuxer ---
-    full_audio_path = output_dir / "full_audio.wav"
-    filelist_path = output_dir / "filelist.txt"
-
-    # Write concat file list
-    lines = []
-    for seg in segments:
-        # Use forward slashes and quote the path
-        safe_path = str(Path(seg.path).name)
-        lines.append(f"file '{safe_path}'")
-
-    filelist_path.write_text("\n".join(lines), encoding="utf-8")
-
-    ffmpeg = find_ffmpeg()
-    await run_ffmpeg(
-        [
-            ffmpeg,
-            "-f", "concat",
-            "-safe", "0",
-            "-i", str(filelist_path),
-            "-c", "copy",
-            "-y", str(full_audio_path),
-        ],
-        description="WAV concatenation",
-    )
-
-    # --- Validate concatenated audio ---
-    if not full_audio_path.exists():
-        return {
-            **state,
-            "error": "full_audio.wav was not created",
-            "failed_node": "asset_fetcher",
-        }
-
-    probe = await probe_media(full_audio_path)
-    full_duration_sec = float(probe["format"]["duration"])
-    full_duration_ms = full_duration_sec * 1000.0
-
-    stream_types = [
-        s.get("codec_type") for s in probe.get("streams", [])
-    ]
-    if "audio" not in stream_types:
-        return {
-            **state,
-            "error": "full_audio.wav has no audio stream",
-            "failed_node": "asset_fetcher",
-        }
-
-    elapsed = (time.perf_counter() - start_time) * 1000
-    logger.info(
-        f"[asset_fetcher] Audio pipeline complete: "
-        f"{full_duration_ms:.0f}ms total, "
-        f"{len(adjusted_segments)} segments, "
-        f"took {elapsed:.0f}ms"
-    )
-
-    # --- Update state ---
-    return {
-        **state,
-        "audio_segments": adjusted_segments,
-        "full_audio_path": str(full_audio_path.resolve()),
-        "full_audio_duration_ms": full_duration_ms,
-    }
+    except Exception as e:
+        logger.error(f"[asset_fetcher] Pipeline failed: {e}")
+        return {**state, "error": str(e), "failed_node": "asset_fetcher"}

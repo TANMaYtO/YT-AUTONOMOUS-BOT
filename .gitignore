@@ -25,6 +25,9 @@ assets/music/*
 history.json
 queue.json
 
+# --- Models ---
+models/
+
 # --- Logs ---
 logs/*
 !logs/.gitkeep

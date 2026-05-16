@@ -69,6 +69,7 @@ class VideoState(TypedDict, total=False):
     # ------------------------------------------------------------------
     run_id: str                  # UUID4 — unique ID for this pipeline run
     created_at: str              # ISO 8601 — when the pipeline started
+    config: dict                 # loaded config, injected at pipeline start
 
     # ------------------------------------------------------------------
     # Node 1 — Idea Generator (writes)
@@ -160,6 +161,7 @@ def create_initial_state(run_id: str | None = None) -> dict[str, Any]:
         # Pipeline metadata
         "run_id": run_id or str(uuid.uuid4()),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "config": {},
         # Node 1
         "topic": "",
         "character_a": "",
