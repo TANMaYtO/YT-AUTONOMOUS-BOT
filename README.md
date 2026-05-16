@@ -115,21 +115,33 @@ Place your dynamic background loop in `assets/backgrounds/` and background music
 
 ### 5. Google OAuth Setup
 
-To upload autonomously, the bot needs `credentials/google_oauth.json` (Desktop Client ID) from Google Cloud Console. Follow the script instructions:
+To upload autonomously, the bot needs `credentials/google_oauth.json` (Desktop Client ID) from Google Cloud Console.
+1. Download your OAuth Desktop App JSON and save it to `credentials/google_oauth.json`.
+2. Run the one-time authentication flow:
 ```bash
-python uploader/auth_flow.py
+python auth_flow.py
 ```
-This performs a one-time browser login and caches the refresh tokens.
+This performs a one-time browser login and caches the refresh tokens in `credentials/token.json`.
 
-### 6. Run the Pipeline
+### 6. Test the Pipeline & Uploads
 
 ```bash
-# Full end-to-end autonomous test without uploading
+# Full end-to-end autonomous test (creates video, saves to output/ & queue.json, does NOT upload)
 python scripts/test_phase3.py
 
-# Production: Daily generation cron/task scheduler runner
-python agent/run_generation.py
+# Test the YouTube Upload flow (reads queue, prompts for confirmation, uploads to YT)
+python scripts/test_upload.py
 ```
+
+### 7. Production Deployment (Task Scheduler)
+
+Once tested, you can automate the entire daily lifecycle using Windows Task Scheduler:
+
+```bash
+# Automates the creation of 4 daily tasks (1 Generation run, 3 Upload runs)
+python scripts/setup_task_scheduler.py
+```
+*Note: You will need to check the "Run whether user is logged on or not" option in the Windows Task Scheduler GUI for these tasks to run completely headless.*
 
 ---
 

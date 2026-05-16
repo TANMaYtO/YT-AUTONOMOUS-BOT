@@ -24,6 +24,8 @@ assets/music/*
 !assets/music/.gitkeep
 history.json
 queue.json
+*.lock
+*.tmp
 
 # --- Models ---
 models/
