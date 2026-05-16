@@ -2,29 +2,29 @@
 
 > Fully autonomous YouTube Shorts pipeline — from AI-generated scripts to uploaded videos. Zero human input required.
 
-An end-to-end autonomous agent that generates educational "brainrot" YouTube Shorts featuring anime characters explaining tech topics. Powered by **Gemini 2.5 Flash**, **Edge TTS**, and **FFmpeg**.
+An end-to-end autonomous agent that generates educational "brainrot" YouTube Shorts featuring anime characters explaining tech topics. Powered by **Gemini 2.5 Flash**, **Kokoro-ONNX TTS**, **Whisper**, and **FFmpeg**.
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   LangGraph Pipeline                │
-├──────────┬──────────┬──────────┬──────────┬─────────┤
-│  Node 1  │  Node 2  │  Node 4  │  Node 5  │ Node 6  │
-│  Idea    │  Script  │  Asset   │  Video   │ Metadata│
-│Generator │  Writer  │ Fetcher  │ Assembler│Generator│
-│          │          │          │          │         │
-│ Topics + │  Gemini  │ Edge TTS │ 2-pass   │ Gemini  │
-│ History  │  Flash   │ Voices   │ FFmpeg   │ SEO     │
-└──────────┴──────────┴──────────┴──────────┴─────────┘
-                         │
-                    ┌────┴────┐
-                    │ Node 7  │
-                    │ YouTube │
-                    │Uploader │
-                    └─────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    LangGraph StateGraph                     │
+├────────┬────────┬────────┬────────┬────────┬───────┬────────┤
+│ Node 1 │ Node 2 │ Node 3 │ Node 4 │ Node 5 │ Node 6│ Node 7 │
+│  Idea  │ Script │ Image  │ Asset  │ Video  │ Meta- │ Queue  │
+│  Gen   │ Writer │ Picker │ Fetcher│ Assembl│ data  │ Manager│
+│        │        │        │        │        │       │        │
+│ Topics │ Gemini │ Local  │ Kokoro │ 2-pass │ Gemini│ JSON   │
+│   +    │ Flash  │ PNGs + │  TTS + │ FFmpeg │  SEO  │ Queue  │
+│ History│        │ BG     │ Whisper│        │       │        │
+└────────┴────────┴────────┴────────┴────────┴───────┴────────┘
+                                                         │
+                                                  ┌──────┴──────┐
+                                                  │   YouTube   │
+                                                  │  Uploader   │
+                                                  └─────────────┘
 ```
 
 ### Pipeline Flow
@@ -33,43 +33,35 @@ An end-to-end autonomous agent that generates educational "brainrot" YouTube Sho
 |------|------|-------------|
 | 1 | **Idea Generator** | Weighted random topic selection + character pairing from history |
 | 2 | **Script Writer** | Gemini 2.5 Flash generates brainrot dialogue, Pydantic-validated |
-| 3 | **Image Picker** | Selects character expression PNGs from pre-generated library |
-| 4 | **Asset Fetcher** | Edge TTS generates voice audio for each dialogue line |
-| 5 | **Video Assembler** | 2-pass FFmpeg — character overlays, subtitles, background music |
+| 3 | **Image Picker** | Selects character expression PNGs + background video |
+| 4 | **Asset Fetcher** | Local Kokoro-ONNX TTS audio + Whisper forced alignment for timestamps |
+| 5 | **Video Assembler** | 2-pass FFmpeg — character overlays, subtitles (.ass), background music |
 | 6 | **Metadata Generator** | Gemini generates SEO-optimized title, description, hashtags |
-| 7 | **Queue Manager** | Schedules and uploads to YouTube via Data API v3 |
+| 7 | **Queue Manager** | Schedules the final generated asset into `queue.json` |
 
 ---
 
 ## 📁 Project Structure
 
-```
+```text
 YT-AUTONOMOUS-BOT/
-├── agent/                    # Core pipeline logic
+├── agent/                    # Core LangGraph pipeline logic
 │   ├── nodes/                # LangGraph node implementations
-│   │   ├── idea_generator.py # Node 1: Topic + character selection
-│   │   ├── script_writer.py  # Node 2: Gemini script generation
-│   │   ├── image_picker.py   # Node 3: Character image selection
-│   │   ├── asset_fetcher.py  # Node 4: TTS audio generation
-│   │   ├── video_assembler.py# Node 5: FFmpeg video assembly
-│   │   ├── metadata_generator.py # Node 6: SEO metadata
-│   │   └── queue_manager.py  # Node 7: Upload queue
 │   ├── config.py             # YAML config loader
 │   ├── models.py             # Pydantic models (ScriptLine, etc.)
 │   ├── orchestrator.py       # LangGraph graph wiring
-│   ├── startup_checks.py     # Pre-flight validation
-│   ├── state.py              # VideoState schema
-│   └── utils.py              # Shared utilities
+│   ├── run_generation.py     # Windows Task Scheduler daemon runner
+│   ├── startup_checks.py     # Pre-flight environment validation
+│   └── state.py              # Single-source-of-truth TypedDict
 ├── scripts/                  # Setup & test scripts
-│   ├── generate_image_library.py  # One-time character image gen
-│   ├── test_phase1.py        # Phase 1 test (TTS + FFmpeg)
-│   └── test_phase2.py        # Phase 2 test (Gemini → video)
+│   ├── generate_image_library.py  
+│   └── test_phase3.py        # Autonomous end-to-end test
 ├── uploader/                 # YouTube upload module
-│   ├── scheduler.py          # Upload scheduling
-│   └── youtube_upload.py     # YouTube Data API v3
+│   ├── scheduler.py          # Upload scheduling logic
+│   └── youtube_upload.py     # YouTube Data API v3 OAuth flow
+├── models/                   # Local models (Kokoro ONNX, voices)
 ├── config.yaml               # Characters, topics, upload slots
 ├── requirements.txt          # Python dependencies
-├── main.py                   # Entry point
 ├── .env.template             # Environment variable template
 └── README.md
 ```
@@ -107,41 +99,51 @@ cp .env.template .env
 # GEMINI_API_KEY=your_key_here
 ```
 
-### 3. Generate Character Images (One-time)
+### 3. Download Kokoro Models
 
+Save both required models to `models/kokoro/`:
+- **ONNX Model:** [kokoro-v1.0.onnx](https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx) (~310MB)
+- **Voices Binary:** [voices-v1.0.bin](https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin) (~8MB)
+
+### 4. Setup Local Assets
+
+Run the image generator to cache character UI overlays:
 ```bash
 python scripts/generate_image_library.py
 ```
+Place your dynamic background loop in `assets/backgrounds/` and background music in `assets/music/`.
 
-This generates 30 character expression PNGs (5 characters × 6 expressions) from [Pollinations AI](https://pollinations.ai) with background removal.
+### 5. Google OAuth Setup
 
-### 4. Add Background Assets
+To upload autonomously, the bot needs `credentials/google_oauth.json` (Desktop Client ID) from Google Cloud Console. Follow the script instructions:
+```bash
+python uploader/auth_flow.py
+```
+This performs a one-time browser login and caches the refresh tokens.
 
-Place your assets in:
-- `assets/backgrounds/` — Background video (`.mp4`)
-- `assets/music/` — Background music (`.mp3`)
-
-### 5. Run the Pipeline
+### 6. Run the Pipeline
 
 ```bash
-# Interactive test (generates 1 video, pauses for script review)
-python scripts/test_phase2.py
+# Full end-to-end autonomous test without uploading
+python scripts/test_phase3.py
 
-# Full autonomous mode
-python main.py
+# Production: Daily generation cron/task scheduler runner
+python agent/run_generation.py
 ```
 
 ---
 
-## 🎭 Characters
+## 🎭 Characters & TTS
 
-| Character | Anime | Role | Voice |
-|-----------|-------|------|-------|
-| Nobita | Doraemon | Confused | en-US-SteffanNeural |
-| Luffy | One Piece | Confused | en-AU-WilliamMultilingualNeural |
-| Doraemon | Doraemon | Explainer | en-GB-ThomasNeural |
-| Light Yagami | Death Note | Explainer | en-GB-RyanNeural |
-| Gojo | Jujutsu Kaisen | Explainer | en-US-AndrewMultilingualNeural |
+We recently upgraded from Edge TTS to fully local **Kokoro-ONNX** for high-quality, expressive voices.
+
+| Character | Anime | Role | Kokoro Voice ID |
+|-----------|-------|------|-----------------|
+| Nobita | Doraemon | Confused | am_puck |
+| Luffy | One Piece | Confused | am_michael |
+| Doraemon | Doraemon | Explainer | am_adam |
+| Light Yagami | Death Note | Explainer | bm_lewis |
+| Gojo | Jujutsu Kaisen | Explainer | am_fenrir |
 
 ---
 
@@ -149,37 +151,25 @@ python main.py
 
 | Component | Technology |
 |-----------|-----------|
-| **AI Script Generation** | Google Gemini 2.5 Flash |
-| **Text-to-Speech** | Edge TTS (Microsoft Neural voices) |
-| **Video Assembly** | FFmpeg (libx264, libass, amix) |
 | **Agent Orchestration** | LangGraph |
+| **AI Script Generation** | Google Gemini 2.5 Flash |
+| **Text-to-Speech** | Kokoro-ONNX (Local) |
+| **Audio Alignment** | OpenAI Whisper (Tiny Model, FP32) |
+| **Video Assembly** | FFmpeg (libx264, libass, amix) |
 | **Data Validation** | Pydantic v2 |
-| **Character Images** | Pollinations AI + rembg |
+| **Upload Flow** | YouTube Data API v3 |
 | **Retry Logic** | Tenacity (exponential backoff) |
-| **Config** | YAML + python-dotenv |
 
 ---
 
 ## 📋 Configuration
 
-All pipeline settings are in `config.yaml`:
+All pipeline settings are inside `config.yaml`:
 
 - **50 tech topics** — weighted random selection, history-aware
 - **5 anime characters** — with roles, voices, and image folders
 - **3 daily upload slots** — configurable schedule
 - **Video specs** — 1080×1920, 30fps, AAC audio
-
----
-
-## 🧪 Testing
-
-```bash
-# Phase 1: Test TTS + FFmpeg only (no API key needed)
-python scripts/test_phase1.py
-
-# Phase 2: Full pipeline with Gemini (needs API key)
-python scripts/test_phase2.py
-```
 
 ---
 
@@ -195,10 +185,10 @@ python scripts/test_phase2.py
 
 ## ⚠️ Notes
 
-- Free-tier Gemini API has rate limits — the pipeline includes exponential backoff retry logic
-- Character images are generated once and cached locally — the daily pipeline never depends on Pollinations at runtime
-- Videos are 1080×1920 vertical format optimized for YouTube Shorts
-- The `history.json` file prevents topic/character pair repetition across runs
+- Free-tier Gemini API has rate limits — the pipeline includes exponential backoff retry logic.
+- The pipeline does not require internet connection for audio generation anymore, as Kokoro and Whisper are completely local.
+- Videos are 1080×1920 vertical format optimized for YouTube Shorts.
+- The `history.json` file prevents topic/character pair repetition across runs.
 
 ---
 
