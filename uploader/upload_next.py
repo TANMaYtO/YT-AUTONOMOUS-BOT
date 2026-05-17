@@ -25,9 +25,10 @@ from uploader.youtube_upload import (
     check_oauth_health, 
     upload_video, 
     validate_video_file, 
-    _send_telegram_alert,
     load_credentials
 )
+from agent.alerts import alert_upload_failure
+import asyncio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,7 +84,7 @@ def run_upload_next():
     
     # 4. Validates the video file
     if not video_path or not validate_video_file(video_path):
-        _handle_failure(queue_data, entry_id, lock_file, f"Video validation failed for path: {video_path}")
+        _handle_failure(queue_data, entry_id, lock_file, f"Video validation failed for path: {video_path}", title)
         sys.exit(1)
         
     # 5. Checks OAuth health
@@ -109,7 +110,7 @@ def run_upload_next():
     except Exception as e:
         # 8. On failure: update queue, alert, exit
         error_msg = f"Upload failed: {str(e)}"
-        _handle_failure(queue_data, entry_id, lock_file, error_msg)
+        _handle_failure(queue_data, entry_id, lock_file, error_msg, title)
         sys.exit(1)
 
 
@@ -134,15 +135,38 @@ def _handle_success(queue_data: list, entry_id: str, lock_file: str, video_id: s
                 entry["status"] = "uploaded"
                 entry["youtube_video_id"] = video_id
                 entry["uploaded_at"] = datetime.now(timezone.utc).isoformat()
+                
+                # Also update history.json
+                from agent.history import HISTORY_PATH
+                import json as json_lib
+                if HISTORY_PATH.exists():
+                    try:
+                        with open(HISTORY_PATH, "r", encoding="utf-8") as hf:
+                            history = json_lib.load(hf)
+                        for h_entry in history:
+                            if h_entry.get("run_id") == entry_id:
+                                h_entry["youtube_video_id"] = video_id
+                                break
+                        temp_h = HISTORY_PATH.with_suffix(".tmp")
+                        with open(temp_h, "w", encoding="utf-8") as hf:
+                            json_lib.dump(history, hf, indent=2)
+                        os.replace(temp_h, HISTORY_PATH)
+                    except Exception as e:
+                        logger.error(f"Failed to update history: {e}")
+                
                 break
                 
         _atomic_write_queue(current_queue)
         
 
-def _handle_failure(queue_data: list, entry_id: str, lock_file: str, error_message: str):
+def _handle_failure(queue_data: list, entry_id: str, lock_file: str, error_message: str, title: str = "Unknown"):
     """Handle upload failure: update queue, alert telegram, exit."""
     logger.error(error_message)
-    _send_telegram_alert(f"🚨 YT Autonomous Bot Upload Failed!\nEntry ID: {entry_id}\nError: {error_message}")
+    
+    # NOTE: asyncio.run() used here because this function 
+    # is synchronous. If ever called from async context, 
+    # replace with: await alert_upload_failure(...)
+    asyncio.run(alert_upload_failure(title, error_message))
     
     with FileLock(lock_file):
         with open(QUEUE_PATH, "r", encoding="utf-8") as f:

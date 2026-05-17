@@ -143,6 +143,12 @@ async def run_pipeline(config: dict, run_id: str = None) -> VideoState:
             f"[pipeline] FAILED at {final_state.get('failed_node')} "
             f"— {final_state['error']}"
         )
+        from agent.alerts import alert_pipeline_failure
+        await alert_pipeline_failure(
+            run_id=final_state["run_id"],
+            failed_node=final_state.get("failed_node", "unknown"),
+            error=final_state["error"]
+        )
     else:
         logger.info(
             f"[pipeline] SUCCESS — "

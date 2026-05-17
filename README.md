@@ -1,12 +1,12 @@
-# 🤖 YT Autonomous Bot
+# Autonomous YouTube Shorts Pipeline
 
 > Fully autonomous YouTube Shorts pipeline — from AI-generated scripts to uploaded videos. Zero human input required.
 
-An end-to-end autonomous agent that generates educational "brainrot" YouTube Shorts featuring anime characters explaining tech topics. Powered by **Gemini 2.5 Flash**, **Kokoro-ONNX TTS**, **Whisper**, and **FFmpeg**.
+An end-to-end autonomous agent that generates educational YouTube Shorts featuring animated characters explaining technology topics. Powered by **Gemini 2.5 Flash**, **Kokoro-ONNX TTS**, **Whisper**, and **FFmpeg**.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -29,19 +29,19 @@ An end-to-end autonomous agent that generates educational "brainrot" YouTube Sho
 
 ### Pipeline Flow
 
-| Node | Name | What it does |
+| Node | Name | Description |
 |------|------|-------------|
-| 1 | **Idea Generator** | Weighted random topic selection + character pairing from history |
-| 2 | **Script Writer** | Gemini 2.5 Flash generates brainrot dialogue, Pydantic-validated |
-| 3 | **Image Picker** | Selects character expression PNGs + background video |
-| 4 | **Asset Fetcher** | Local Kokoro-ONNX TTS audio + Whisper forced alignment for timestamps |
-| 5 | **Video Assembler** | 2-pass FFmpeg — character overlays, subtitles (.ass), background music |
-| 6 | **Metadata Generator** | Gemini generates SEO-optimized title, description, hashtags |
-| 7 | **Queue Manager** | Schedules the final generated asset into `queue.json` |
+| 1 | **Idea Generator** | Discovers trending tech topics via Google Trends (PyTrends) and pairs characters, with history-based deduplication to ensure content variety. |
+| 2 | **Script Writer** | Gemini 2.5 Flash generates dynamic dialogue, validated by Pydantic schemas. |
+| 3 | **Image Picker** | Selects character expression PNGs and dynamically loops background video assets. |
+| 4 | **Asset Fetcher** | Renders local Kokoro-ONNX TTS audio and aligns word-level timestamps using Whisper forced alignment. |
+| 5 | **Video Assembler** | 2-pass FFmpeg compilation — overlaying characters, burning subtitles (.ass format), and mixing background music. |
+| 6 | **Metadata Generator** | Gemini constructs SEO-optimized titles, descriptions, and hashtags. |
+| 7 | **Queue Manager** | Schedules and stages the final generated asset into `queue.json` for upload. |
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```text
 YT-AUTONOMOUS-BOT/
@@ -52,6 +52,9 @@ YT-AUTONOMOUS-BOT/
 │   ├── orchestrator.py       # LangGraph graph wiring
 │   ├── run_generation.py     # Windows Task Scheduler daemon runner
 │   ├── startup_checks.py     # Pre-flight environment validation
+│   ├── trends.py             # Google Trends data ingestion
+│   ├── history.py            # Local history deduplication
+│   ├── alerts.py             # Telegram failure alerts
 │   └── state.py              # Single-source-of-truth TypedDict
 ├── scripts/                  # Setup & test scripts
 │   ├── generate_image_library.py  
@@ -68,7 +71,7 @@ YT-AUTONOMOUS-BOT/
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -115,7 +118,7 @@ Place your dynamic background loop in `assets/backgrounds/` and background music
 
 ### 5. Google OAuth Setup
 
-To upload autonomously, the bot needs `credentials/google_oauth.json` (Desktop Client ID) from Google Cloud Console.
+To upload autonomously, the bot requires `credentials/google_oauth.json` (Desktop Client ID) from the Google Cloud Console.
 1. Download your OAuth Desktop App JSON and save it to `credentials/google_oauth.json`.
 2. Run the one-time authentication flow:
 ```bash
@@ -141,13 +144,13 @@ Once tested, you can automate the entire daily lifecycle using Windows Task Sche
 # Automates the creation of 4 daily tasks (1 Generation run, 3 Upload runs)
 python scripts/setup_task_scheduler.py
 ```
-*Note: You will need to check the "Run whether user is logged on or not" option in the Windows Task Scheduler GUI for these tasks to run completely headless.*
+*Note: Ensure the "Run whether user is logged on or not" option is checked in the Windows Task Scheduler GUI for these tasks to run completely headless.*
 
 ---
 
-## 🎭 Characters & TTS
+## Characters & TTS
 
-We recently upgraded from Edge TTS to fully local **Kokoro-ONNX** for high-quality, expressive voices.
+The pipeline utilizes local Kokoro-ONNX models for high-quality, expressive text-to-speech without network latency or API costs.
 
 | Character | Anime | Role | Kokoro Voice ID |
 |-----------|-------|------|-----------------|
@@ -159,7 +162,7 @@ We recently upgraded from Edge TTS to fully local **Kokoro-ONNX** for high-quali
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Component | Technology |
 |-----------|-----------|
@@ -174,36 +177,35 @@ We recently upgraded from Edge TTS to fully local **Kokoro-ONNX** for high-quali
 
 ---
 
-## 📋 Configuration
+## Configuration
 
-All pipeline settings are inside `config.yaml`:
+All pipeline settings are located inside `config.yaml`:
 
-- **50 tech topics** — weighted random selection, history-aware
-- **5 anime characters** — with roles, voices, and image folders
-- **3 daily upload slots** — configurable schedule
-- **Video specs** — 1080×1920, 30fps, AAC audio
+- **50 base tech topics** — supplemented dynamically by Google Trends (pytrends).
+- **5 anime characters** — configured with assigned roles, voices, and image directories.
+- **3 daily upload slots** — configurable upload scheduling logic.
+- **Video specs** — 1080×1920 resolution, 30fps, AAC audio formatting.
 
 ---
 
-## 📝 Environment Variables
+## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GEMINI_API_KEY` | ✅ | Google Gemini API key |
-| `TELEGRAM_BOT_TOKEN` | ❌ | Telegram bot for failure alerts |
-| `TELEGRAM_CHAT_ID` | ❌ | Telegram chat for alerts |
+| `GEMINI_API_KEY` | Yes | Google Gemini API key |
+| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token for failure alerts and daily summaries |
+| `TELEGRAM_CHAT_ID` | No | Telegram chat ID for alert dispatch |
 
 ---
 
-## ⚠️ Notes
+## Notes & Limitations
 
-- Free-tier Gemini API has rate limits — the pipeline includes exponential backoff retry logic.
-- The pipeline does not require internet connection for audio generation anymore, as Kokoro and Whisper are completely local.
-- Videos are 1080×1920 vertical format optimized for YouTube Shorts.
-- The `history.json` file prevents topic/character pair repetition across runs.
+- The free-tier Gemini API is subject to rate limits. The pipeline leverages exponential backoff and Tenacity retry logic to mitigate `503 Unavailable` and `429 Too Many Requests` errors.
+- Text-to-speech and alignment are performed entirely locally (Kokoro + Whisper). An active internet connection is only required for Gemini generation, Google Trends scraping, and final YouTube upload.
+- The `history.json` tracking system implements deduplication to prevent topic and character pair repetition across 30-run generation windows.
 
 ---
 
-## 📄 License
+## License
 
 MIT

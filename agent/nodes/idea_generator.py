@@ -15,6 +15,7 @@ Writes to state:
     trend_source
 """
 
+import itertools
 import json
 import logging
 import random
@@ -68,135 +69,21 @@ def _pick_topic(
     topics: list[str],
     recent_history: list[dict[str, Any]],
 ) -> str:
-    """Pick a topic using weighted random selection.
-
-    Topics used in recent history get 0.1 weight.
-    Topics not used recently get 1.0 weight.
-    The immediately previous topic is hard-blocked.
-
-    Args:
-        topics: Full list of available topics from config.
-        recent_history: Last N history entries.
-
-    Returns:
-        Selected topic string.
-    """
-    # Hard-block: never repeat the immediately previous topic
-    last_topic = ""
-    if recent_history:
-        last_topic = recent_history[-1].get("topic", "")
-
-    # Build weight map
-    recent_topics = {
-        entry.get("topic", "") for entry in recent_history
-    }
-
-    weights: list[float] = []
-    eligible_topics: list[str] = []
-
-    for topic in topics:
-        if topic == last_topic:
-            continue  # Hard block
-        eligible_topics.append(topic)
-        weight = 0.1 if topic in recent_topics else 1.0
-        weights.append(weight)
-
-    if not eligible_topics:
-        # Fallback: all topics blocked (shouldn't happen with 50 topics)
-        logger.warning(
-            "[idea_generator] All topics blocked — "
-            "picking random from full list"
-        )
-        eligible_topics = [t for t in topics if t != last_topic] or topics
-        weights = [1.0] * len(eligible_topics)
-
-    selected = random.choices(eligible_topics, weights=weights, k=1)[0]
-
-    logger.info(
-        f"[idea_generator] Topic selection:\n"
-        f"  Eligible: {len(eligible_topics)}/{len(topics)}\n"
-        f"  Recently used: {len(recent_topics)}\n"
-        f"  Hard-blocked: '{last_topic}'\n"
-        f"  Selected: '{selected}'"
-    )
-
-    return selected
+    pass # Replaced by integrated logic in generate_idea
 
 
 def _pick_characters(
     characters: list[dict[str, Any]],
     recent_history: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Pick one confused + one explainer character.
-
-    Avoids same pair as immediately previous run.
-    Max 5 re-rolls then proceeds anyway.
-
-    Args:
-        characters: Character configs from config.yaml.
-        recent_history: Last N history entries.
-
-    Returns:
-        Tuple of (confused_char, explainer_char) config dicts.
-    """
-    confused_chars = [
-        c for c in characters if c.get("role") == "confused"
-    ]
-    explainer_chars = [
-        c for c in characters if c.get("role") == "explainer"
-    ]
-
-    if not confused_chars or not explainer_chars:
-        raise ValueError(
-            "Config must have at least 1 confused and "
-            "1 explainer character"
-        )
-
-    # Get the immediately previous pair
-    last_pair: set[str] = set()
-    if recent_history:
-        last = recent_history[-1]
-        last_pair = {
-            last.get("character_a", ""),
-            last.get("character_b", ""),
-        }
-
-    for attempt in range(MAX_PAIR_REROLLS):
-        confused = random.choice(confused_chars)
-        explainer = random.choice(explainer_chars)
-        pair = {confused["name"], explainer["name"]}
-
-        if pair != last_pair or attempt == MAX_PAIR_REROLLS - 1:
-            if attempt > 0:
-                logger.info(
-                    f"[idea_generator] Character pair found "
-                    f"after {attempt + 1} attempts"
-                )
-            break
-
-    logger.info(
-        f"[idea_generator] Character selection:\n"
-        f"  Confused:  {confused['name']} ({confused['show']})\n"
-        f"  Explainer: {explainer['name']} ({explainer['show']})\n"
-        f"  Previous pair: {last_pair or 'none'}"
-    )
-
-    return confused, explainer
+    pass # Replaced by integrated logic in generate_idea
 
 
 async def generate_idea(
     state: dict[str, Any],
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    """Node 1: Select topic and characters for the next video.
-
-    Args:
-        state: Current pipeline state dict.
-        config: Loaded config dict.
-
-    Returns:
-        Updated state with topic, characters, and roles populated.
-    """
+    """Node 1: Select topic and characters for the next video."""
     logger.info(
         f"[idea_generator] Starting — "
         f"state keys: {list(state.keys())}"
@@ -223,49 +110,77 @@ async def generate_idea(
         }
 
     try:
-        # --- Load config data ---
-        topics = config.get("topics", [])
-        characters = config.get("characters", [])
+        from agent.trends import get_trending_topics
+        from agent.history import is_duplicate, get_used_topics, get_used_pairs
+        import itertools
+        import random
+        config_topics = config.get("topics", [])
+        trending_topics = await get_trending_topics(config, config_topics)
+        trend_source = "pytrends" if trending_topics else "fallback"
+        
+        all_topics = trending_topics + config_topics
+        used_topics = get_used_topics(30)
+        
+        # Weighted topic selection
+        topic_weights = []
+        for t in all_topics:
+            if t in trending_topics:
+                topic_weights.append(1.5)
+            elif t in used_topics:
+                topic_weights.append(0.1)
+            else:
+                topic_weights.append(1.0)
+                
+        characters = config["characters"]
+        char_names = [c["name"] for c in characters]
+        
+        # Weighted character selection
+        all_pairs = list(itertools.combinations(char_names, 2))
+        used_pairs = get_used_pairs(30)
+        
+        pair_weights = []
+        for p in all_pairs:
+            if tuple(sorted(p)) in used_pairs:
+                pair_weights.append(0.1)
+            else:
+                pair_weights.append(1.0)
+                
+        selected_topic = None
+        char_a, char_b = None, None
+        
+        for attempt in range(6):
+            selected_topic = random.choices(all_topics, weights=topic_weights, k=1)[0]
+            selected_pair = random.choices(all_pairs, weights=pair_weights, k=1)[0]
+            char_a, char_b = selected_pair
+            
+            # Randomize order
+            if random.random() > 0.5:
+                char_a, char_b = char_b, char_a
+                
+            if not is_duplicate(selected_topic, char_a, char_b):
+                break
+                
+            if attempt == 5:
+                logger.warning("Could not avoid duplicate after 5 attempts — proceeding")
 
-        if not topics:
-            raise ValueError("No topics found in config")
-        if not characters:
-            raise ValueError("No characters found in config")
-
-        # Validate character configs
-        for char in characters:
-            CharacterConfig(**char)
-
-        # --- Load history ---
-        project_root = Path(__file__).resolve().parent.parent.parent
-        history_path = project_root / config.get(
-            "paths", {}
-        ).get("history", "history.json")
-        history = _load_history(history_path)
-        recent = history[-HISTORY_WINDOW:]
-
-        # --- Pick topic ---
-        topic = _pick_topic(topics, recent)
-
-        # --- Pick characters ---
-        confused, explainer = _pick_characters(characters, recent)
-
-        # character_a = confused (asks dumb questions)
-        # character_b = explainer (answers)
+        # Match the selected names back to their config dicts
+        char_a_data = next(c for c in characters if c["name"] == char_a)
+        char_b_data = next(c for c in characters if c["name"] == char_b)
+        
         elapsed = (time.perf_counter() - start_time) * 1000
 
         result = {
             **state,
-            "topic": topic,
-            "character_a": confused["name"],
-            "character_b": explainer["name"],
-            "character_a_role": confused["role"],
-            "character_b_role": explainer["role"],
-            "character_a_voice": confused["voice"],
-            "character_b_voice": explainer["voice"],
-            "character_a_image_folder": confused["image_folder"],
-            "character_b_image_folder": explainer["image_folder"],
-            "trend_source": "fallback",
+            "topic": selected_topic,
+            "character_a": char_a,
+            "character_b": char_b,
+            "character_a_role": char_a_data["role"],
+            "character_b_role": char_b_data["role"],
+            "character_a_voice": char_a_data["voice"],
+            "character_b_voice": char_b_data["voice"],
+            "character_a_image_folder": char_a_data["image_folder"],
+            "character_b_image_folder": char_b_data["image_folder"],
+            "trend_source": trend_source,
         }
 
         logger.info(

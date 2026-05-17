@@ -119,11 +119,16 @@ async def main():
     logger.info(f"[daily] Done: {success_count}/{videos_per_day} videos generated")
     logger.info("=" * 60)
     
+    titles = []
     for r in results:
         if r["status"] == "success":
             logger.info(f"  ✅ Video {r['index']}: {r['title']} → {r['slot']}")
+            titles.append(r["title"])
         else:
             logger.info(f"  ❌ Video {r['index']}: {r['error']}")
+
+    from agent.alerts import alert_daily_summary
+    await alert_daily_summary(success_count, videos_per_day, titles)
 
 
 if __name__ == "__main__":

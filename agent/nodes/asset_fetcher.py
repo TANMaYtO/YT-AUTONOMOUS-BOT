@@ -9,6 +9,7 @@ Writes to state:
 
 import asyncio
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, List
@@ -55,6 +56,38 @@ def _get_whisper():
     return _WHISPER
 
 
+def remove_emojis(text: str) -> str:
+    emoji_pattern = re.compile(
+        "["
+        u"\U0001F600-\U0001F64F"  # emoticons
+        u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+        u"\U0001F680-\U0001F6FF"  # transport & map
+        u"\U0001F1E0-\U0001F1FF"  # flags
+        u"\U00002702-\U000027B0"
+        u"\U000024C2-\U0001F251"
+        u"\U0001f926-\U0001f937"
+        u"\U00010000-\U0010ffff"
+        u"\u2640-\u2642"
+        u"\u2600-\u2B55"
+        u"\u200d"
+        u"\u23cf"
+        u"\u23e9"
+        u"\u231a"
+        u"\ufe0f"
+        u"\u3030"
+        "]+", flags=re.UNICODE
+    )
+    return emoji_pattern.sub('', text)
+
+
+def sanitize_line_for_tts(text: str) -> str:
+    """Remove emojis and special chars before TTS."""
+    text = remove_emojis(text)
+    text = re.sub(r'[*_#`~]', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(5),
@@ -73,12 +106,14 @@ async def _generate_line_audio(
     whisper_model = _get_whisper()
     
     speed = config["pipeline"].get("tts_speed", 1.0)
+    
+    clean_text = sanitize_line_for_tts(line_text)
 
     # 1. Generate audio with Kokoro (CPU-bound)
     samples, sample_rate = await loop.run_in_executor(
         None,
         lambda: kokoro.create(
-            text=line_text,
+            text=clean_text,
             voice=voice_name,
             speed=speed,
             lang="en-us"

@@ -21,21 +21,7 @@ TOKEN_PATH = PROJECT_ROOT / "credentials" / "token.json"
 QUEUE_PATH = PROJECT_ROOT / "queue.json"
 
 
-def _send_telegram_alert(message: str) -> None:
-    """Send a telegram alert if configured."""
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-    if not bot_token or not chat_id:
-        return
-    import urllib.request
-    import urllib.parse
-    
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    data = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode()
-    try:
-        urllib.request.urlopen(url, data=data, timeout=10)
-    except Exception as e:
-        logger.error(f"Failed to send Telegram alert: {e}")
+# Telegram alerting now handled centrally by agent/alerts.py
 
 
 def load_credentials() -> Credentials:
@@ -77,10 +63,16 @@ def check_oauth_health() -> bool:
             if time_left < timedelta(hours=48):
                 logger.warning(f"OAuth token expiring within 48 hours (at {expiry_dt}). Auto-refresh should handle it.")
                 
+                # NOTE: asyncio.run() used here because this function 
+                # is synchronous. If ever called from async context, 
+                # replace with: await alert_oauth_expiry(...)
+                import asyncio
+                from agent.alerts import alert_oauth_expiry
+                asyncio.run(alert_oauth_expiry(expiry_dt.isoformat()))
+                
         return True
     except Exception as e:
         logger.error(f"OAuth health check failed: {e}")
-        _send_telegram_alert(f"🚨 YT Autonomous Bot: OAuth token invalid or refresh failed.\nError: {e}")
         return False
 
 

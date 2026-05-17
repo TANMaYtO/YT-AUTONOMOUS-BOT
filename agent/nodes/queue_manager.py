@@ -90,6 +90,19 @@ async def manage_queue(
 
         logger.info(f"[queue_manager] Added to queue: {entry_id} for {upload_dt}")
         
+        # Save to history ONLY after successful generation
+        from agent.history import save_history_entry
+        from datetime import datetime
+        save_history_entry({
+            "run_id": entry_id,
+            "date": datetime.now().date().isoformat(),
+            "topic": state.get("topic"),
+            "character_a": state.get("character_a"),
+            "character_b": state.get("character_b"),
+            "title": state.get("title"),
+            "youtube_video_id": None
+        })
+        
         return {
             **state,
             "queue_entry_id": entry_id,
