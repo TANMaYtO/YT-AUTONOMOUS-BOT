@@ -28,9 +28,27 @@ export default function ScheduleStep() {
     setUploadTimes(newTimes);
   };
 
-  const handleLaunch = () => {
-    // In Phase 2: save config to Supabase first
-    router.push("/dashboard");
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleLaunch = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/configs/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videos_per_day: videosPerDay,
+          upload_times: uploadTimes,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to save config");
+      
+      router.push("/dashboard");
+    } catch (err) {
+      console.error(err);
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -105,9 +123,10 @@ export default function ScheduleStep() {
 
         <button
           onClick={handleLaunch}
-          className="w-full flex items-center justify-center font-sans font-bold text-2xl uppercase py-6 bg-cronus-red text-cronus-white border-2 border-cronus-red hover:bg-cronus-bg hover:text-cronus-red transition-all shadow-[8px_8px_0px_0px_rgba(255,34,0,0.3)] hover:shadow-none hover:translate-x-2 hover:translate-y-2 mb-6"
+          disabled={isLoading}
+          className="w-full flex items-center justify-center font-sans font-bold text-2xl uppercase py-6 bg-cronus-red text-cronus-white border-2 border-cronus-red hover:bg-cronus-bg hover:text-cronus-red transition-all shadow-[8px_8px_0px_0px_rgba(255,34,0,0.3)] hover:shadow-none hover:translate-x-2 hover:translate-y-2 mb-6 disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[8px_8px_0px_0px_rgba(255,34,0,0.3)]"
         >
-          LAUNCH CRONUS <ArrowRight className="ml-3 w-8 h-8" />
+          {isLoading ? "INITIALIZING..." : "LAUNCH CRONUS"} <ArrowRight className="ml-3 w-8 h-8" />
         </button>
         <p className="font-mono text-xs text-cronus-gray uppercase tracking-widest text-center">
           YOU CAN CHANGE ALL SETTINGS ANYTIME FROM THE DASHBOARD

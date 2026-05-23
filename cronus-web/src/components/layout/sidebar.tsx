@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, Settings, Video } from "lucide-react";
+import { LayoutDashboard, Settings, Video, Banknote } from "lucide-react";
 import { SignOutButton } from "./sign-out-button";
 
 export function Sidebar() {
@@ -26,6 +26,13 @@ export function Sidebar() {
         >
           <Settings className="w-4 h-4 mr-3" />
           Settings
+        </Link>
+        <Link
+          href="/dashboard/pricing"
+          className="flex items-center px-4 py-3 text-sm hover:bg-cronus-red/10 border-2 border-transparent hover:border-cronus-red transition-colors uppercase"
+        >
+          <Banknote className="w-4 h-4 mr-3" />
+          Pricing
         </Link>
       </nav>
 

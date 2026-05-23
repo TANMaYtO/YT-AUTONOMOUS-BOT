@@ -2,20 +2,14 @@
 
 import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { createBrowserClient } from "@supabase/ssr";
+import { createClient } from "@/lib/supabase/client";
 
 export function SignOutButton() {
   const router = useRouter();
 
   const handleSignOut = async () => {
-    // We will initialize supabase properly in Phase 2
-    // const supabase = createBrowserClient(
-    //   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    //   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    // );
-    // const { error } = await supabase.auth.signOut();
-    
-    // For now, simulate sign out
+    const supabase = createClient();
+    await supabase.auth.signOut();
     router.push("/auth");
   };
 

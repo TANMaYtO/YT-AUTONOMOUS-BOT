@@ -61,6 +61,30 @@ export default function NicheStep() {
     }
   };
 
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleContinue = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/configs/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          niche: selectedNiche,
+          topics: topics,
+          characters: [selectedCharacter],
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to save config");
+      
+      router.push("/onboard/schedule");
+    } catch (err) {
+      console.error(err);
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-cronus-bg flex flex-col items-center">
       <ProgressBar currentStep={2} />
@@ -160,10 +184,11 @@ export default function NicheStep() {
 
         <div className="flex justify-center">
           <button
-            onClick={() => router.push("/onboard/schedule")}
-            className="w-full max-w-md flex items-center justify-center font-sans font-bold text-xl uppercase px-8 py-4 bg-cronus-red text-cronus-white border-2 border-cronus-red hover:bg-cronus-bg hover:text-cronus-red transition-all shadow-[8px_8px_0px_0px_rgba(255,34,0,0.3)] hover:shadow-none hover:translate-x-2 hover:translate-y-2"
+            onClick={handleContinue}
+            disabled={isLoading}
+            className="w-full max-w-md flex items-center justify-center font-sans font-bold text-xl uppercase px-8 py-4 bg-cronus-red text-cronus-white border-2 border-cronus-red hover:bg-cronus-bg hover:text-cronus-red transition-all shadow-[8px_8px_0px_0px_rgba(255,34,0,0.3)] hover:shadow-none hover:translate-x-2 hover:translate-y-2 disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[8px_8px_0px_0px_rgba(255,34,0,0.3)]"
           >
-            CONTINUE <ArrowRight className="ml-3 w-6 h-6" />
+            {isLoading ? "SAVING..." : "CONTINUE"} <ArrowRight className="ml-3 w-6 h-6" />
           </button>
         </div>
       </main>
