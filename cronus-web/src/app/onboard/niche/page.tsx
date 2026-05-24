@@ -78,7 +78,8 @@ export default function NicheStep() {
 
       if (!res.ok) throw new Error("Failed to save config");
       
-      router.push("/onboard/schedule");
+      // Full page load to avoid Next.js router cache issues
+      window.location.href = "/onboard/schedule";
     } catch (err) {
       console.error(err);
       setIsLoading(false);

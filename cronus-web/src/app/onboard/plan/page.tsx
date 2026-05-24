@@ -21,7 +21,8 @@ export default function OnboardPlanPage() {
         throw new Error("Failed to update plan");
       }
 
-      router.push("/onboard/youtube");
+      // Full page load to bypass Next.js router cache
+      window.location.href = "/onboard/youtube";
     } catch (err) {
       console.error(err);
       setLoadingPlan(null);

@@ -21,7 +21,7 @@ export function Sidebar() {
           Dashboard
         </Link>
         <Link
-          href="/settings"
+          href="/dashboard/settings"
           className="flex items-center px-4 py-3 text-sm hover:bg-cronus-red/10 border-2 border-transparent hover:border-cronus-red transition-colors uppercase"
         >
           <Settings className="w-4 h-4 mr-3" />

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
 import { ProgressBar } from "@/components/onboard/progress-bar";
-import { ArrowRight, Clock, Info } from "lucide-react";
+import { ArrowRight, Clock, Info, Lock } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 const HOURS = Array.from({ length: 18 }, (_, i) => {
   const h = i + 6;
@@ -11,26 +11,57 @@ const HOURS = Array.from({ length: 18 }, (_, i) => {
 });
 
 export default function ScheduleStep() {
-  const router = useRouter();
-  const [videosPerDay, setVideosPerDay] = useState(3);
-  const [uploadTimes, setUploadTimes] = useState(["09:00", "15:00", "20:00"]);
+  const [videosPerDay, setVideosPerDay] = useState(1);
+  const [uploadTimes, setUploadTimes] = useState(["09:00"]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isPro, setIsPro] = useState(false);
+  const [planLoaded, setPlanLoaded] = useState(false);
 
-  const handleVideosChange = (num: number) => {
+  // Fetch user plan on mount to determine video limits
+  useEffect(() => {
+    /** Fetch the user's plan tier from Supabase. */
+    async function fetchPlan(): Promise<void> {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: plan } = await supabase
+        .from("plans")
+        .select("plan_type, videos_per_day_limit")
+        .eq("user_id", user.id)
+        .single();
+
+      if (plan?.plan_type === "pro") {
+        setIsPro(true);
+        setVideosPerDay(3);
+        setUploadTimes(["09:00", "15:00", "20:00"]);
+      } else {
+        setIsPro(false);
+        setVideosPerDay(1);
+        setUploadTimes(["09:00"]);
+      }
+      setPlanLoaded(true);
+    }
+    fetchPlan();
+  }, []);
+
+  /** Handle video count change — only available for pro users. */
+  const handleVideosChange = (num: number): void => {
+    if (!isPro && num > 1) return;
     setVideosPerDay(num);
-    // Keep existing times or slice/default based on the new number
     const defaultTimes = ["09:00", "15:00", "20:00"];
     setUploadTimes(defaultTimes.slice(0, num));
   };
 
-  const handleTimeChange = (index: number, newTime: string) => {
+  /** Handle individual upload time change. */
+  const handleTimeChange = (index: number, newTime: string): void => {
     const newTimes = [...uploadTimes];
     newTimes[index] = newTime;
     setUploadTimes(newTimes);
   };
 
-  const [isLoading, setIsLoading] = useState(false);
-
-  const handleLaunch = async () => {
+  /** Save config and navigate to dashboard via full reload. */
+  const handleLaunch = async (): Promise<void> => {
     setIsLoading(true);
     try {
       const res = await fetch("/api/configs/update", {
@@ -43,13 +74,24 @@ export default function ScheduleStep() {
       });
 
       if (!res.ok) throw new Error("Failed to save config");
-      
-      router.push("/dashboard");
+
+      // Full page reload to bypass Next.js router cache
+      window.location.href = "/dashboard";
     } catch (err) {
       console.error(err);
       setIsLoading(false);
     }
   };
+
+  if (!planLoaded) {
+    return (
+      <div className="min-h-screen bg-cronus-bg flex items-center justify-center">
+        <div className="font-mono text-cronus-gray uppercase tracking-widest animate-pulse">
+          Loading configuration...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-cronus-bg flex flex-col items-center">
@@ -65,22 +107,38 @@ export default function ScheduleStep() {
           {/* Videos Per Day */}
           <section className="mb-10">
             <h2 className="font-mono text-xl uppercase mb-6 text-cronus-white">Output Volume</h2>
-            <div className="flex gap-4">
-              {[1, 2, 3].map((num) => (
-                <button
-                  key={num}
-                  onClick={() => handleVideosChange(num)}
-                  className={`w-16 h-16 flex items-center justify-center font-sans font-bold text-2xl border-2 transition-all ${
-                    videosPerDay === num
-                      ? "bg-cronus-red border-cronus-red text-cronus-bg shadow-[4px_4px_0px_0px_rgba(255,34,0,0.3)]"
-                      : "bg-cronus-bg border-cronus-gray text-cronus-white hover:border-cronus-white"
-                  }`}
-                >
-                  {num}
-                </button>
-              ))}
-              <span className="ml-4 font-mono text-sm text-cronus-gray self-end mb-2 uppercase">Videos / Day</span>
-            </div>
+
+            {isPro ? (
+              <div className="flex gap-4">
+                {[1, 2, 3].map((num) => (
+                  <button
+                    key={num}
+                    onClick={() => handleVideosChange(num)}
+                    className={`w-16 h-16 flex items-center justify-center font-sans font-bold text-2xl border-2 transition-all ${
+                      videosPerDay === num
+                        ? "bg-cronus-red border-cronus-red text-cronus-bg shadow-[4px_4px_0px_0px_rgba(255,34,0,0.3)]"
+                        : "bg-cronus-bg border-cronus-gray text-cronus-white hover:border-cronus-white"
+                    }`}
+                  >
+                    {num}
+                  </button>
+                ))}
+                <span className="ml-4 font-mono text-sm text-cronus-gray self-end mb-2 uppercase">Videos / Day</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-6">
+                <div className="w-16 h-16 flex items-center justify-center font-sans font-bold text-2xl border-2 bg-cronus-red border-cronus-red text-cronus-bg shadow-[4px_4px_0px_0px_rgba(255,34,0,0.3)]">
+                  1
+                </div>
+                <div className="flex flex-col">
+                  <span className="font-mono text-sm text-cronus-white uppercase font-bold">1 Video / Day</span>
+                  <span className="font-mono text-xs text-cronus-gray uppercase mt-1 flex items-center">
+                    <Lock className="w-3 h-3 mr-1.5" />
+                    Upgrade to PRO for up to 3 videos/day
+                  </span>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Upload Times */}
