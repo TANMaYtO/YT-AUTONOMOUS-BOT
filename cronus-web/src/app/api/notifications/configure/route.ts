@@ -1,8 +1,7 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { telegram_bot_token, telegram_chat_id, daily_summary, failure_alerts } = body;
@@ -28,44 +27,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Telegram API rejected the token" }, { status: 400 });
     }
 
-    const cookieStore = await cookies();
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, options)
-              );
-            } catch {}
-          },
-        },
-      }
-    );
+    const supabase = await createClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
+
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Update user_configs with notification settings
+    // Fetch existing config to preserve non-notification fields
+    const { data: existingConfig } = await supabase
+      .from("user_configs")
+      .select("*")
+      .eq("user_id", user.id)
+      .single();
+
+    // Merge notification fields into existing config to prevent data loss
+    const updateData = {
+      ...existingConfig,
+      user_id: user.id,
+      telegram_bot_token,
+      telegram_chat_id,
+      daily_summary: !!daily_summary,
+      failure_alerts: !!failure_alerts,
+      updated_at: new Date().toISOString(),
+    };
+
     const { error: updateError } = await supabase
       .from("user_configs")
-      .upsert({
-        user_id: user.id,
-        telegram_bot_token,
-        telegram_chat_id,
-        daily_summary: !!daily_summary,
-        failure_alerts: !!failure_alerts,
-        updated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'user_id',
+      .upsert(updateData, {
+        onConflict: "user_id",
       });
 
     if (updateError) {

@@ -1,59 +1,311 @@
 "use client";
 
-import { useState } from "react";
-import { Clock, Plus, X, Trash2, ShieldAlert } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Clock, Plus, X, Trash2, ShieldAlert, Lock } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 const HOURS = Array.from({ length: 18 }, (_, i) => `${(i + 6).toString().padStart(2, "0")}:00`);
 
-export default function SettingsPage() {
-  // Section 2: Schedule State
-  const [videosPerDay, setVideosPerDay] = useState(3);
-  const [uploadTimes, setUploadTimes] = useState(["09:00", "15:00", "20:00"]);
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 
-  // Section 3: Topics State
-  const [topics, setTopics] = useState(["AI", "Machine Learning", "Automation", "Coding", "Robots"]);
-  const [isAddingTopic, setIsAddingTopic] = useState(false);
-  const [customTopic, setCustomTopic] = useState("");
+interface YouTubeConnection {
+  channel_id: string;
+  channel_name: string;
+  subscriber_count: number;
+  connected_at: string;
+}
 
-  // Section 4: Characters State
-  const [characters, setCharacters] = useState([
-    { id: 1, name: "NEXUS", role: "EXPLAINER", voice: "en-US-Journey-D" },
-    { id: 2, name: "AURA", role: "EXPLAINER", voice: "en-US-Journey-F" },
-    { id: 3, name: "VORTEX", role: "ANALYST", voice: "en-GB-Standard-A" },
-  ]);
+interface Character {
+  id: number;
+  name: string;
+  role: string;
+  voice: string;
+}
 
-  const handleVideosChange = (num: number) => {
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
+
+export default function SettingsPage(): JSX.Element {
+  /** Root settings page — wired to Supabase for all five sections. */
+
+  const supabase = createClient();
+
+  // Global UI state
+  const [loading, setLoading] = useState<boolean>(true);
+  const [savedLabel, setSavedLabel] = useState<string | null>(null);
+
+  // Section 1: YouTube Connection
+  const [ytConnection, setYtConnection] = useState<YouTubeConnection | null>(null);
+
+  // Section 2: Schedule
+  const [videosPerDay, setVideosPerDay] = useState<number>(1);
+  const [uploadTimes, setUploadTimes] = useState<string[]>(["09:00"]);
+  const [isPro, setIsPro] = useState<boolean>(false);
+
+  // Section 3: Topics
+  const [topics, setTopics] = useState<string[]>([]);
+  const [isAddingTopic, setIsAddingTopic] = useState<boolean>(false);
+  const [customTopic, setCustomTopic] = useState<string>("");
+
+  // Section 4: Characters
+  const [characters, setCharacters] = useState<Character[]>([]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Flash a "SAVED" badge for 2 seconds                             */
+  /* ---------------------------------------------------------------- */
+
+  function flashSaved(label: string): void {
+    /** Show a brief success toast that auto-dismisses. */
+    setSavedLabel(label);
+    setTimeout(() => setSavedLabel(null), 2000);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Initial data fetch                                               */
+  /* ---------------------------------------------------------------- */
+
+  useEffect(() => {
+    /** Fetch all settings data from Supabase on mount. */
+    async function fetchAll(): Promise<void> {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Parallel fetches
+      const [ytRes, configRes, planRes] = await Promise.all([
+        supabase
+          .from("youtube_connections")
+          .select("channel_id, channel_name, subscriber_count, connected_at")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("user_configs")
+          .select("videos_per_day, upload_times, topics, characters")
+          .eq("user_id", user.id)
+          .single(),
+        supabase
+          .from("plans")
+          .select("plan_type")
+          .eq("user_id", user.id)
+          .single(),
+      ]);
+
+      // YouTube
+      if (ytRes.data) setYtConnection(ytRes.data as YouTubeConnection);
+
+      // Plan
+      const proUser = planRes.data?.plan_type === "pro";
+      setIsPro(proUser);
+
+      // Config
+      if (configRes.data) {
+        const cfg = configRes.data;
+        setVideosPerDay(cfg.videos_per_day ?? 1);
+        setUploadTimes((cfg.upload_times as string[]) ?? ["09:00"]);
+        setTopics((cfg.topics as string[]) ?? []);
+        setCharacters((cfg.characters as Character[]) ?? []);
+      }
+
+      setLoading(false);
+    }
+
+    fetchAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ---------------------------------------------------------------- */
+  /*  Section 1 handlers                                               */
+  /* ---------------------------------------------------------------- */
+
+  async function handleDisconnectYouTube(): Promise<void> {
+    /** Delete the YouTube connection after user confirmation. */
+    const confirmed = window.confirm(
+      "Are you sure you want to disconnect your YouTube channel? You will need to reconnect to resume uploads."
+    );
+    if (!confirmed) return;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("youtube_connections")
+      .delete()
+      .eq("user_id", user.id);
+
+    if (!error) {
+      setYtConnection(null);
+      flashSaved("DISCONNECTED");
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Section 2 handlers                                               */
+  /* ---------------------------------------------------------------- */
+
+  function handleVideosChange(num: number): void {
+    /** Update video count — blocked for free users above 1. */
+    if (!isPro && num > 1) return;
     setVideosPerDay(num);
     const defaultTimes = ["09:00", "15:00", "20:00"];
     setUploadTimes(defaultTimes.slice(0, num));
-  };
+  }
 
-  const handleTimeChange = (index: number, newTime: string) => {
+  function handleTimeChange(index: number, newTime: string): void {
+    /** Update a single upload time slot. */
     const newTimes = [...uploadTimes];
     newTimes[index] = newTime;
     setUploadTimes(newTimes);
-  };
+  }
 
-  const handleAddTopic = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  async function handleSaveSchedule(): Promise<void> {
+    /** Persist schedule changes via the config API. */
+    const res = await fetch("/api/configs/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ videos_per_day: videosPerDay, upload_times: uploadTimes }),
+    });
+    if (res.ok) flashSaved("SCHEDULE SAVED");
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Section 3 handlers                                               */
+  /* ---------------------------------------------------------------- */
+
+  function handleAddTopic(e: React.KeyboardEvent<HTMLInputElement>): void {
+    /** Add a custom topic on Enter key press. */
     if (e.key === "Enter" && customTopic.trim()) {
       if (!topics.includes(customTopic.trim())) setTopics([...topics, customTopic.trim()]);
       setCustomTopic("");
       setIsAddingTopic(false);
     }
-  };
+  }
 
-  const handleRemoveTopic = (topicToRemove: string) => {
+  function handleRemoveTopic(topicToRemove: string): void {
+    /** Remove a topic from the local state. */
     setTopics(topics.filter((t) => t !== topicToRemove));
-  };
+  }
 
-  const handleRemoveCharacter = (id: number) => {
+  async function handleSaveTopics(): Promise<void> {
+    /** Persist topic changes via the config API. */
+    const res = await fetch("/api/configs/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topics }),
+    });
+    if (res.ok) flashSaved("TOPICS SAVED");
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Section 4 handlers                                               */
+  /* ---------------------------------------------------------------- */
+
+  function handleRemoveCharacter(id: number): void {
+    /** Remove a character from local state by id. */
     setCharacters(characters.filter((c) => c.id !== id));
-  };
+  }
 
-  const Divider = () => <div className="border-t-2 border-cronus-red my-12" />;
+  function handleAddCharacter(): void {
+    /** Prompt user for a character name and add a stub to state. */
+    const name = window.prompt("Enter character name:")?.trim().toUpperCase();
+    if (!name) return;
+    const newId = characters.length > 0 ? Math.max(...characters.map((c) => c.id)) + 1 : 1;
+    setCharacters([
+      ...characters,
+      { id: newId, name, role: "EXPLAINER", voice: "en-US-Journey-D" },
+    ]);
+  }
+
+  async function handleSaveCharacters(): Promise<void> {
+    /** Persist character changes via the config API. */
+    const res = await fetch("/api/configs/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ characters }),
+    });
+    if (res.ok) flashSaved("CHARACTERS SAVED");
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Section 5 handlers                                               */
+  /* ---------------------------------------------------------------- */
+
+  async function handleDeleteAllHistory(): Promise<void> {
+    /** Delete all video records for the current user after confirmation. */
+    const confirmed = window.confirm("Are you sure? This cannot be undone.");
+    if (!confirmed) return;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("videos")
+      .delete()
+      .eq("user_id", user.id);
+
+    if (!error) flashSaved("HISTORY DELETED");
+  }
+
+  async function handleDeactivateAgent(): Promise<void> {
+    /** Deactivate the agent by setting is_active to false after confirmation. */
+    const confirmed = window.confirm(
+      "Are you sure you want to deactivate the agent? This will halt all scheduled operations."
+    );
+    if (!confirmed) return;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("user_configs")
+      .update({ is_active: false })
+      .eq("user_id", user.id);
+
+    if (!error) flashSaved("AGENT DEACTIVATED");
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Shared UI                                                        */
+  /* ---------------------------------------------------------------- */
+
+  const Divider = (): JSX.Element => <div className="border-t-2 border-cronus-red my-12" />;
+
+  /* ---------------------------------------------------------------- */
+  /*  Loading screen                                                   */
+  /* ---------------------------------------------------------------- */
+
+  if (loading) {
+    return (
+      <div className="max-w-4xl mx-auto pb-24 flex items-center justify-center min-h-[60vh]">
+        <div className="font-mono text-cronus-gray uppercase tracking-widest animate-pulse">
+          Loading settings...
+        </div>
+      </div>
+    );
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Render                                                           */
+  /* ---------------------------------------------------------------- */
 
   return (
     <div className="max-w-4xl mx-auto pb-24">
+      {/* Saved toast */}
+      {savedLabel && (
+        <div className="fixed top-6 right-6 z-50 bg-cronus-red text-cronus-bg font-sans font-bold text-sm uppercase px-6 py-3 shadow-[4px_4px_0px_0px_rgba(255,34,0,0.3)] animate-pulse">
+          ✓ {savedLabel}
+        </div>
+      )}
+
       <h1 className="font-sans font-bold text-5xl uppercase mb-12 text-cronus-white">
         SETTINGS<span className="text-cronus-red">_</span>
       </h1>
@@ -62,21 +314,29 @@ export default function SettingsPage() {
       <section>
         <h2 className="font-mono text-xl uppercase mb-6 text-cronus-white">01. YouTube Connection</h2>
         <div className="border-2 border-cronus-gray/30 border-l-8 border-l-cronus-red bg-cronus-surface p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            <div className="font-mono text-sm uppercase tracking-widest text-cronus-gray mb-1">Connected Channel</div>
-            <div className="font-sans font-bold text-2xl text-cronus-white uppercase mb-2">INDUSTRIAL_LOGS</div>
-            <div className="flex gap-4 font-mono text-xs text-cronus-gray">
-              <span>Subscribers: 12.4K</span>
-              <span>•</span>
-              <span>Connected on: May 17 2026</span>
+          {ytConnection ? (
+            <>
+              <div>
+                <div className="font-mono text-sm uppercase tracking-widest text-cronus-gray mb-1">Connected Channel</div>
+                <div className="font-sans font-bold text-2xl text-cronus-white uppercase mb-2">{ytConnection.channel_name}</div>
+                <div className="flex gap-4 font-mono text-xs text-cronus-gray">
+                  <span>Subscribers: {ytConnection.subscriber_count.toLocaleString()}</span>
+                  <span>•</span>
+                  <span>Connected on: {new Date(ytConnection.connected_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                </div>
+              </div>
+              <button
+                onClick={handleDisconnectYouTube}
+                className="px-6 py-3 font-sans font-bold text-lg uppercase border-2 border-cronus-white text-cronus-white hover:border-cronus-red hover:text-cronus-red transition-colors whitespace-nowrap"
+              >
+                DISCONNECT
+              </button>
+            </>
+          ) : (
+            <div className="font-mono text-sm uppercase tracking-widest text-cronus-gray">
+              No YouTube channel connected.
             </div>
-          </div>
-          <button
-            onClick={() => console.log("Disconnecting YouTube...")}
-            className="px-6 py-3 font-sans font-bold text-lg uppercase border-2 border-cronus-white text-cronus-white hover:border-cronus-red hover:text-cronus-red transition-colors whitespace-nowrap"
-          >
-            DISCONNECT
-          </button>
+          )}
         </div>
       </section>
 
@@ -88,21 +348,36 @@ export default function SettingsPage() {
         <div className="border-2 border-cronus-gray/30 bg-cronus-surface p-6">
           <div className="mb-8">
             <div className="font-mono text-sm uppercase tracking-widest text-cronus-gray mb-4">Output Volume</div>
-            <div className="flex gap-4">
-              {[1, 2, 3].map((num) => (
-                <button
-                  key={num}
-                  onClick={() => handleVideosChange(num)}
-                  className={`w-14 h-14 flex items-center justify-center font-sans font-bold text-xl border-2 transition-all ${
-                    videosPerDay === num
-                      ? "bg-cronus-red border-cronus-red text-cronus-bg shadow-[4px_4px_0px_0px_rgba(255,34,0,0.3)]"
-                      : "bg-cronus-bg border-cronus-gray text-cronus-white hover:border-cronus-white"
-                  }`}
-                >
-                  {num}
-                </button>
-              ))}
-            </div>
+            {isPro ? (
+              <div className="flex gap-4">
+                {[1, 2, 3].map((num) => (
+                  <button
+                    key={num}
+                    onClick={() => handleVideosChange(num)}
+                    className={`w-14 h-14 flex items-center justify-center font-sans font-bold text-xl border-2 transition-all ${
+                      videosPerDay === num
+                        ? "bg-cronus-red border-cronus-red text-cronus-bg shadow-[4px_4px_0px_0px_rgba(255,34,0,0.3)]"
+                        : "bg-cronus-bg border-cronus-gray text-cronus-white hover:border-cronus-white"
+                    }`}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-6">
+                <div className="w-14 h-14 flex items-center justify-center font-sans font-bold text-xl border-2 bg-cronus-red border-cronus-red text-cronus-bg shadow-[4px_4px_0px_0px_rgba(255,34,0,0.3)]">
+                  1
+                </div>
+                <div className="flex flex-col">
+                  <span className="font-mono text-sm text-cronus-white uppercase font-bold">1 Video / Day</span>
+                  <span className="font-mono text-xs text-cronus-gray uppercase mt-1 flex items-center">
+                    <Lock className="w-3 h-3 mr-1.5" />
+                    Upgrade to PRO for up to 3 videos/day
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mb-8">
@@ -129,7 +404,7 @@ export default function SettingsPage() {
           </div>
 
           <button
-            onClick={() => console.log("Saving schedule...", { videosPerDay, uploadTimes })}
+            onClick={handleSaveSchedule}
             className="w-full md:w-auto px-8 py-4 font-sans font-bold text-lg uppercase bg-cronus-red text-cronus-bg hover:bg-cronus-white transition-colors"
           >
             SAVE SCHEDULE
@@ -166,7 +441,7 @@ export default function SettingsPage() {
             )}
           </div>
           <button
-            onClick={() => console.log("Saving topics...", { topics })}
+            onClick={handleSaveTopics}
             className="w-full md:w-auto px-8 py-4 font-sans font-bold text-lg uppercase bg-cronus-red text-cronus-bg hover:bg-cronus-white transition-colors"
           >
             SAVE TOPICS
@@ -200,13 +475,13 @@ export default function SettingsPage() {
             ))}
           </div>
           <button
-            onClick={() => console.log("Opening add character modal...")}
+            onClick={handleAddCharacter}
             className="w-full flex items-center justify-center border-2 border-cronus-red border-dashed text-cronus-red hover:bg-cronus-red hover:text-cronus-bg hover:border-solid transition-all py-4 font-sans font-bold text-lg uppercase mb-8"
           >
             <Plus className="w-5 h-5 mr-2" /> ADD CHARACTER
           </button>
           <button
-            onClick={() => console.log("Saving characters...", { characters })}
+            onClick={handleSaveCharacters}
             className="w-full md:w-auto px-8 py-4 font-sans font-bold text-lg uppercase bg-cronus-red text-cronus-bg hover:bg-cronus-white transition-colors"
           >
             SAVE CHARACTERS
@@ -226,7 +501,7 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6">
             <div>
               <button
-                onClick={() => console.log("Deleting all history...")}
+                onClick={handleDeleteAllHistory}
                 className="w-full flex items-center justify-center px-6 py-4 border-2 border-cronus-red text-cronus-red hover:bg-cronus-red hover:text-cronus-bg font-sans font-bold text-lg uppercase transition-colors mb-3"
               >
                 <Trash2 className="w-5 h-5 mr-3" /> DELETE ALL HISTORY
@@ -238,7 +513,7 @@ export default function SettingsPage() {
 
             <div>
               <button
-                onClick={() => console.log("Deactivating agent...")}
+                onClick={handleDeactivateAgent}
                 className="w-full flex items-center justify-center px-6 py-4 border-2 border-cronus-red text-cronus-red hover:bg-cronus-red hover:text-cronus-bg font-sans font-bold text-lg uppercase transition-colors mb-3"
               >
                 DEACTIVATE AGENT

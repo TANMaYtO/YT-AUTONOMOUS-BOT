@@ -22,9 +22,16 @@ export default async function DashboardPage() {
   const queue = allVideos.filter((v) => v.status === "pending");
   const history = allVideos.filter((v) => v.status === "uploaded" || v.status === "failed").slice(0, 50);
   const totalVideos = allVideos.length;
-  // Mock views for now since YouTube API sync isn't built
-  const totalViews = "0";
-  const uptime = "100%";
+  const totalUploaded = allVideos.filter((v) => v.status === "uploaded").length;
+
+  // Fetch agent status from user_configs
+  const { data: userConfig } = await supabase
+    .from("user_configs")
+    .select("is_active")
+    .eq("user_id", user.id)
+    .single();
+
+  const agentStatus = userConfig?.is_active ? "ACTIVE" : "IDLE";
 
   return (
     <div className="space-y-8">
@@ -38,15 +45,15 @@ export default async function DashboardPage() {
         </div>
         <div className="border-2 border-cronus-gray/30 p-6 bg-cronus-surface">
           <div className="flex items-center text-cronus-gray mb-4 font-mono text-xs uppercase tracking-widest">
-            <Activity className="w-4 h-4 mr-2" /> Total Views
+            <Activity className="w-4 h-4 mr-2" /> Uploaded
           </div>
-          <div className="font-sans font-bold text-5xl text-cronus-white">{totalViews}</div>
+          <div className="font-sans font-bold text-5xl text-cronus-white">{totalUploaded}</div>
         </div>
         <div className="border-2 border-cronus-red p-6 bg-cronus-red/10 shadow-[4px_4px_0px_0px_rgba(255,34,0,0.3)]">
           <div className="flex items-center text-cronus-red mb-4 font-mono text-xs uppercase tracking-widest">
-            <Clock className="w-4 h-4 mr-2" /> Agent Uptime
+            <Clock className="w-4 h-4 mr-2" /> Agent Status
           </div>
-          <div className="font-sans font-bold text-5xl text-cronus-red">{uptime}</div>
+          <div className="font-sans font-bold text-5xl text-cronus-red">{agentStatus}</div>
         </div>
       </div>
 

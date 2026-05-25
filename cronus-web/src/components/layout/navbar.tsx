@@ -1,7 +1,25 @@
+"use client";
+
 import Link from "next/link";
 import { User, Bell } from "lucide-react";
+import { useState, useEffect } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 export function Navbar() {
+  const [email, setEmail] = useState("");
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.email) {
+        setEmail(user.email.split("@")[0]);
+      }
+    };
+    
+    fetchUser();
+  }, []);
+
   return (
     <header className="h-16 border-b-2 border-cronus-gray/30 bg-cronus-surface flex items-center justify-between px-8">
       <div className="flex items-center space-x-4">
@@ -19,8 +37,7 @@ export function Navbar() {
           <div className="w-8 h-8 bg-cronus-red flex items-center justify-center mr-3">
             <User className="w-4 h-4 text-cronus-white" />
           </div>
-          {/* TODO: Replace hardcoded Admin with user email from Supabase session */}
-          <span className="font-mono text-sm uppercase">Admin</span>
+          <span className="font-mono text-sm uppercase">{email || "..."}</span>
         </div>
       </div>
     </header>
