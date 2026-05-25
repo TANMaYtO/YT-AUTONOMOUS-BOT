@@ -115,14 +115,15 @@ def run_upload_next():
 
 
 def _handle_success(queue_data: list, entry_id: str, lock_file: str, video_id: str, video_path: str):
-    """Handle successful upload: update queue and move file to archive."""
-    # Move video file to archive
-    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    """Handle successful upload: update queue, DELETE file to save space, sync to Supabase."""
+    # Delete video file to save server storage space
     video_file = Path(video_path)
     if video_file.exists():
-        archive_path = ARCHIVE_DIR / video_file.name
-        shutil.move(str(video_file), str(archive_path))
-        logger.info(f"Moved uploaded video to: {archive_path}")
+        try:
+            os.remove(video_file)
+            logger.info(f"Deleted uploaded video to save space: {video_file}")
+        except Exception as e:
+            logger.error(f"Failed to delete video file {video_file}: {e}")
         
     # Update queue entry
     with FileLock(lock_file):
@@ -157,10 +158,26 @@ def _handle_success(queue_data: list, entry_id: str, lock_file: str, video_id: s
                 break
                 
         _atomic_write_queue(current_queue)
+
+    # Sync to Supabase if in bridge mode
+    user_id = os.environ.get("USER_ID", "").strip()
+    if user_id:
+        try:
+            from agent.supabase_bridge import update_video_status
+            url = f"https://youtube.com/shorts/{video_id}"
+            asyncio.run(update_video_status(
+                run_id=entry_id,
+                status="uploaded",
+                youtube_video_id=video_id,
+                youtube_url=url,
+            ))
+            logger.info(f"Supabase video status synced: uploaded")
+        except Exception as e:
+            logger.warning(f"Supabase sync failed (non-fatal): {e}")
         
 
 def _handle_failure(queue_data: list, entry_id: str, lock_file: str, error_message: str, title: str = "Unknown"):
-    """Handle upload failure: update queue, alert telegram, exit."""
+    """Handle upload failure: update queue, alert telegram, sync to Supabase."""
     logger.error(error_message)
     
     # NOTE: asyncio.run() used here because this function 
@@ -179,6 +196,20 @@ def _handle_failure(queue_data: list, entry_id: str, lock_file: str, error_messa
                 break
                 
         _atomic_write_queue(current_queue)
+
+    # Sync failure to Supabase if in bridge mode
+    user_id = os.environ.get("USER_ID", "").strip()
+    if user_id:
+        try:
+            from agent.supabase_bridge import update_video_status
+            asyncio.run(update_video_status(
+                run_id=entry_id,
+                status="failed",
+                error_message=error_message,
+            ))
+            logger.info(f"Supabase video status synced: failed")
+        except Exception as e:
+            logger.warning(f"Supabase sync failed (non-fatal): {e}")
 
 
 def _atomic_write_queue(data: list):

@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 from agent.config import load_config
 from agent.startup_checks import run_all_checks
 from agent.orchestrator import run_pipeline
+from agent.supabase_bridge import (
+    fetch_user_config,
+    sync_video_to_supabase,
+    mark_agent_active,
+)
 
 
 def build_upload_datetime(time_str: str) -> str:
@@ -49,22 +54,30 @@ def build_upload_datetime(time_str: str) -> str:
 
 
 async def main():
-    # 1. Set WindowsSelectorEventLoopPolicy if needed
-    # NOTE: Windows default ProactorEventLoop is required for asyncio.create_subprocess_exec (FFmpeg).
-    # We do NOT set WindowsSelectorEventLoopPolicy here.
+    """Run the daily video generation pipeline."""
+    # 1. Determine mode: Supabase or local config.yaml
+    user_id = os.environ.get("USER_ID", "").strip()
+    supabase_mode = bool(user_id)
 
-    # 2. Load config
-    config = load_config()
-    
+    if supabase_mode:
+        logger.info("[daily] Supabase mode — fetching config from database")
+        config = await fetch_user_config(user_id)
+        await mark_agent_active(user_id, True)
+    else:
+        logger.info("[daily] Local mode — loading config.yaml")
+        config = load_config()
+
     logger.info("=" * 60)
     logger.info("DAILY GENERATION RUNNER STARTED")
+    logger.info(f"Mode: {'SUPABASE' if supabase_mode else 'LOCAL'}")
     logger.info("=" * 60)
 
-    # 3. Run all startup checks
-    checks_passed = await run_all_checks(config)
-    if not checks_passed:
-        logger.error("Startup checks failed — aborting")
-        sys.exit(1)
+    # 2. Run all startup checks (skip in Supabase mode — config structure differs slightly)
+    if not supabase_mode:
+        checks_passed = await run_all_checks(config)
+        if not checks_passed:
+            logger.error("Startup checks failed — aborting")
+            sys.exit(1)
     
     # 4. Get today's video count from config
     videos_per_day = config["pipeline"]["videos_per_day"]
@@ -99,6 +112,9 @@ async def main():
                 "status": "failed",
                 "error": state["error"]
             })
+            # Sync failure to Supabase
+            if supabase_mode:
+                await sync_video_to_supabase(user_id, state, status="failed")
         else:
             results.append({
                 "index": i+1, 
@@ -107,6 +123,9 @@ async def main():
                 "title": state.get("title"),
                 "slot": slot
             })
+            # Sync success to Supabase
+            if supabase_mode:
+                await sync_video_to_supabase(user_id, state, status="pending")
         
         # Wait 30 seconds between videos (rate limiting + disk I/O)
         if i < videos_per_day - 1:
@@ -129,6 +148,10 @@ async def main():
 
     from agent.alerts import alert_daily_summary
     await alert_daily_summary(success_count, videos_per_day, titles)
+
+    # Mark agent as idle after completing all runs
+    if supabase_mode:
+        await mark_agent_active(user_id, False)
 
 
 if __name__ == "__main__":

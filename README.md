@@ -1,33 +1,29 @@
-# Autonomous YouTube Shorts Pipeline
+# Cronus: AI YouTube Shorts SaaS Pipeline
 
 > Fully autonomous YouTube Shorts pipeline — from AI-generated scripts to uploaded videos. Zero human input required.
 
-An end-to-end autonomous agent that generates educational YouTube Shorts featuring animated characters explaining technology topics. Powered by **Gemini 2.5 Flash**, **Kokoro-ONNX TTS**, **Whisper**, and **FFmpeg**.
+An end-to-end autonomous SaaS platform that generates educational YouTube Shorts featuring animated characters explaining technology topics. Powered by **Gemini 2.5 Flash**, **Kokoro-ONNX TTS**, **Whisper**, **FFmpeg**, **Supabase**, and a **Next.js Dashboard**.
 
 ---
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    LangGraph StateGraph                     │
-├────────┬────────┬────────┬────────┬────────┬───────┬────────┤
-│ Node 1 │ Node 2 │ Node 3 │ Node 4 │ Node 5 │ Node 6│ Node 7 │
-│  Idea  │ Script │ Image  │ Asset  │ Video  │ Meta- │ Queue  │
-│  Gen   │ Writer │ Picker │ Fetcher│ Assembl│ data  │ Manager│
-│        │        │        │        │        │       │        │
-│ Topics │ Gemini │ Local  │ Kokoro │ 2-pass │ Gemini│ JSON   │
-│   +    │ Flash  │ PNGs + │  TTS + │ FFmpeg │  SEO  │ Queue  │
-│ History│        │ BG     │ Whisper│        │       │        │
-└────────┴────────┴────────┴────────┴────────┴───────┴────────┘
-                                                         │
-                                                  ┌──────┴──────┐
-                                                  │   YouTube   │
-                                                  │  Uploader   │
-                                                  └─────────────┘
+The project has recently completed **Phase 2: Agent Bridge**, evolving from a local script into a multi-user SaaS architecture.
+
+```text
+┌─────────────────┐       ┌────────────────────────┐       ┌─────────────────────────┐
+│ Next.js Web App │       │     Supabase (DB)      │       │ LangGraph Python Agent  │
+│ - User UI/UX    │ ────► │ - User Configs         │ ◄──── │ - supabase_bridge.py    │
+│ - OAuth Flow    │       │ - Encrypted YT Tokens  │       │ - AES-GCM Decryption    │
+│ - AES-GCM Enc.  │       │ - Video Status/Queue   │       │ - Video Generation      │
+└─────────────────┘       └────────────────────────┘       └───────────┬─────────────┘
+                                                                       │
+                                                               ┌───────▼───────┐
+                                                               │    YouTube    │
+                                                               └───────────────┘
 ```
 
-### Pipeline Flow
+### LangGraph Pipeline Flow
 
 | Node | Name | Description |
 |------|------|-------------|
@@ -37,7 +33,7 @@ An end-to-end autonomous agent that generates educational YouTube Shorts featuri
 | 4 | **Asset Fetcher** | Renders local Kokoro-ONNX TTS audio and aligns word-level timestamps using Whisper forced alignment. |
 | 5 | **Video Assembler** | 2-pass FFmpeg compilation — overlaying characters, burning subtitles (.ass format), and mixing background music. |
 | 6 | **Metadata Generator** | Gemini constructs SEO-optimized titles, descriptions, and hashtags. |
-| 7 | **Queue Manager** | Schedules and stages the final generated asset into `queue.json` for upload. |
+| 7 | **Queue Manager & Uploader** | Syncs metadata with Supabase. Uploads to YouTube using decrypted user tokens, updates DB status, and auto-deletes `.mp4` files to save space. |
 
 ---
 
@@ -47,7 +43,8 @@ An end-to-end autonomous agent that generates educational YouTube Shorts featuri
 YT-AUTONOMOUS-BOT/
 ├── agent/                    # Core LangGraph pipeline logic
 │   ├── nodes/                # LangGraph node implementations
-│   ├── config.py             # YAML config loader
+│   ├── supabase_bridge.py    # Supabase config reader & state sync (Phase 2)
+│   ├── config.py             # Legacy YAML config loader
 │   ├── models.py             # Pydantic models (ScriptLine, etc.)
 │   ├── orchestrator.py       # LangGraph graph wiring
 │   ├── run_generation.py     # Windows Task Scheduler daemon runner
@@ -118,7 +115,11 @@ Place your dynamic background loop in `assets/backgrounds/` and background music
 
 ### 5. Google OAuth Setup
 
-To upload autonomously, the bot requires `credentials/google_oauth.json` (Desktop Client ID) from the Google Cloud Console.
+**Phase 2 / SaaS Mode:**
+OAuth is handled natively via the Next.js frontend, which securely encrypts YouTube refresh tokens before storing them in Supabase. The LangGraph agent securely decrypts them automatically at runtime.
+
+**Local / Standalone Mode:**
+To upload autonomously without the frontend, the bot requires `credentials/google_oauth.json` (Desktop Client ID) from the Google Cloud Console.
 1. Download your OAuth Desktop App JSON and save it to `credentials/google_oauth.json`.
 2. Run the one-time authentication flow:
 ```bash
@@ -177,9 +178,17 @@ The pipeline utilizes local Kokoro-ONNX models for high-quality, expressive text
 
 ---
 
-## Configuration
+## Phase 2: Agent Bridge Updates
 
-All pipeline settings are located inside `config.yaml`:
+The system operates via a dynamic database-driven architecture using **Supabase**:
+
+- **Dynamic Configurations**: The Python LangGraph pipeline dynamically reads user configurations (topics, schedules, characters) from Supabase via `supabase_bridge.py`, replacing the legacy local `config.yaml`.
+- **Secure OAuth Token Management**: Users authenticate their YouTube accounts through the Next.js frontend. The frontend encrypts these tokens using AES-GCM before saving them to the database. The Python agent securely decrypts them at runtime to authorize API uploads.
+- **Auto-Cleanup & Syncing**: To optimize server storage, the uploader automatically deletes the generated `.mp4` assets after a successful upload. It then syncs the upload status (success, error logs, etc.) back to Supabase to keep the Next.js dashboard up-to-date.
+
+## Legacy Configuration (Phase 1)
+
+For local, single-user deployments, pipeline settings can still be managed inside `config.yaml`:
 
 - **50 base tech topics** — supplemented dynamically by Google Trends (pytrends).
 - **5 anime characters** — configured with assigned roles, voices, and image directories.

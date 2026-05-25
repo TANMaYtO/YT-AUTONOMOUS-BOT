@@ -41,3 +41,9 @@ google-api-python-client>=2.0
 
 # Trends (Phase 6)
 pytrends>=4.9
+
+# Supabase (Agent Bridge — Phase 2)
+supabase>=2.0
+
+# AES-GCM token decryption
+cryptography>=42.0
