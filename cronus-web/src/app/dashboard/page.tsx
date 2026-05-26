@@ -33,8 +33,45 @@ export default async function DashboardPage() {
 
   const agentStatus = userConfig?.is_active ? "ACTIVE" : "IDLE";
 
+  // Fetch YouTube connection for token expiry warning
+  const { data: ytConnection } = await supabase
+    .from("youtube_connections")
+    .select("token_expiry")
+    .eq("user_id", user.id)
+    .single();
+
+  let tokenWarning = null;
+  if (ytConnection?.token_expiry) {
+    const expiryDate = new Date(ytConnection.token_expiry);
+    const now = new Date();
+    const timeDiffHours = (expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+    if (timeDiffHours <= 0) {
+      tokenWarning = "EXPIRED";
+    } else if (timeDiffHours <= 24) {
+      tokenWarning = "EXPIRING_SOON";
+    }
+  }
+
   return (
     <div className="space-y-8">
+      {/* Token Expiry Banner */}
+      {tokenWarning && (
+        <div className={`border-2 p-4 flex items-center justify-between font-mono text-sm uppercase ${tokenWarning === "EXPIRED" ? "border-cronus-red bg-cronus-red/10 text-cronus-red shadow-[4px_4px_0px_0px_rgba(255,34,0,0.3)]" : "border-yellow-500 bg-yellow-500/10 text-yellow-500 shadow-[4px_4px_0px_0px_rgba(234,179,8,0.3)]"}`}>
+          <div className="flex items-center">
+            <AlertTriangle className="w-5 h-5 mr-3" />
+            <span>
+              {tokenWarning === "EXPIRED" 
+                ? "Your YouTube connection has expired (Google Testing limit). The agent cannot upload." 
+                : "Your YouTube connection expires in less than 24 hours (Google Testing limit)."}
+            </span>
+          </div>
+          <a href="/onboard/youtube" className={`px-4 py-2 border-2 uppercase font-bold transition-transform hover:-translate-y-1 hover:translate-x-1 ${tokenWarning === "EXPIRED" ? "border-cronus-red hover:shadow-[-4px_4px_0px_0px_rgba(255,34,0,1)] text-cronus-red" : "border-yellow-500 hover:shadow-[-4px_4px_0px_0px_rgba(234,179,8,1)] text-yellow-500"}`}>
+            Reconnect
+          </a>
+        </div>
+      )}
+
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="border-2 border-cronus-gray/30 p-6 bg-cronus-surface">

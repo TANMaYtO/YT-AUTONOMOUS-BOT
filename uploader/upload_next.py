@@ -25,7 +25,8 @@ from uploader.youtube_upload import (
     check_oauth_health, 
     upload_video, 
     validate_video_file, 
-    load_credentials
+    load_credentials,
+    load_credentials_for_user
 )
 from agent.alerts import alert_upload_failure
 import asyncio
@@ -75,6 +76,7 @@ def run_upload_next():
         return
         
     entry_id = pending_entry.get("id", "UNKNOWN")
+    user_id = pending_entry.get("user_id")
     video_path = pending_entry.get("video_path")
     title = pending_entry.get("title", "Untitled")
     description = pending_entry.get("description", "")
@@ -94,7 +96,12 @@ def run_upload_next():
         
     # 6. Uploads via upload_video()
     try:
-        credentials = load_credentials()
+        if user_id:
+            logger.info(f"Loading SaaS credentials from Supabase for user {user_id[:8]}")
+            credentials = load_credentials_for_user(user_id)
+        else:
+            logger.info("Loading legacy local credentials")
+            credentials = load_credentials()
         
         video_id = upload_video(
             video_path=video_path,

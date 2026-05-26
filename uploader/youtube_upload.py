@@ -25,7 +25,7 @@ QUEUE_PATH = PROJECT_ROOT / "queue.json"
 
 
 def load_credentials() -> Credentials:
-    """Load token.json and refresh if expired."""
+    """Load token.json and refresh if expired. (Legacy Local Mode)"""
     if not TOKEN_PATH.exists():
         raise RuntimeError("token.json not found. Run auth_flow.py first.")
 
@@ -44,6 +44,72 @@ def load_credentials() -> Credentials:
             ) from e
     elif creds.expired:
         raise RuntimeError("OAuth token expired and no refresh token available. Run auth_flow.py again.")
+        
+    return creds
+
+import asyncio
+
+def load_credentials_for_user(user_id: str) -> Credentials:
+    """Fetch and decrypt token from Supabase for a specific user. (SaaS Mode)"""
+    from agent.supabase_bridge import fetch_youtube_credentials
+    
+    # fetch_youtube_credentials is async, we need to run it synchronously here
+    # since load_credentials_for_user is used in synchronous upload_video flow.
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+    if loop.is_running():
+        # Should not happen in upload_next.py flow, but just in case
+        raise RuntimeError("Cannot use sync load_credentials_for_user inside an already running event loop.")
+        
+    tokens = loop.run_until_complete(fetch_youtube_credentials(user_id))
+    
+    # We need client_id and client_secret to allow google-auth to refresh the token if it expires
+    client_id = None
+    client_secret = None
+    if CREDENTIALS_PATH.exists():
+        try:
+            with open(CREDENTIALS_PATH, "r", encoding="utf-8") as f:
+                oauth_data = json.load(f)
+                web_or_installed = oauth_data.get("web") or oauth_data.get("installed") or {}
+                client_id = web_or_installed.get("client_id")
+                client_secret = web_or_installed.get("client_secret")
+        except Exception as e:
+            logger.warning(f"Could not load google_oauth.json for client details: {e}")
+            
+    if not client_id or not client_secret:
+        # Fallback to env vars which the web app uses
+        client_id = os.environ.get("YOUTUBE_CLIENT_ID")
+        client_secret = os.environ.get("YOUTUBE_CLIENT_SECRET")
+        
+    if not client_id or not client_secret:
+        raise RuntimeError("Missing YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_SECRET. Cannot construct OAuth credentials.")
+
+    creds = Credentials(
+        token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+    
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            logger.info(f"OAuth token refreshed successfully for user {user_id[:8]}.")
+            # We should technically save the refreshed token back to Supabase here,
+            # but for now we rely on the web frontend handling refreshes or just use the refreshed in-memory token.
+            # In Option 2, the user has to re-auth anyway.
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to refresh OAuth token for user {user_id[:8]}: {e}\n"
+                f"They need to re-authenticate via the dashboard."
+            ) from e
+    elif creds.expired:
+        raise RuntimeError(f"OAuth token expired for user {user_id[:8]} and no refresh token available.")
         
     return creds
 

@@ -61,6 +61,7 @@ async def manage_queue(
 
         new_entry = {
             "id": entry_id,
+            "user_id": os.environ.get("USER_ID", "").strip(),
             "status": "pending",
             "scheduled_upload_time": upload_dt,
             "created_at": state["created_at"],
