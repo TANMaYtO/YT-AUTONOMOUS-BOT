@@ -33,22 +33,22 @@ export default async function DashboardPage() {
 
   const agentStatus = userConfig?.is_active ? "ACTIVE" : "IDLE";
 
-  // Fetch YouTube connection for token expiry warning
+  // Fetch YouTube connection for 7-day Google Testing expiry warning
   const { data: ytConnection } = await supabase
     .from("youtube_connections")
-    .select("token_expiry")
+    .select("connected_at")
     .eq("user_id", user.id)
     .single();
 
   let tokenWarning = null;
-  if (ytConnection?.token_expiry) {
-    const expiryDate = new Date(ytConnection.token_expiry);
+  if (ytConnection?.connected_at) {
+    const connectedDate = new Date(ytConnection.connected_at);
     const now = new Date();
-    const timeDiffHours = (expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+    const daysSinceConnection = (now.getTime() - connectedDate.getTime()) / (1000 * 60 * 60 * 24);
 
-    if (timeDiffHours <= 0) {
+    if (daysSinceConnection >= 7) {
       tokenWarning = "EXPIRED";
-    } else if (timeDiffHours <= 24) {
+    } else if (daysSinceConnection >= 6) {
       tokenWarning = "EXPIRING_SOON";
     }
   }
