@@ -1,19 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { User, Bell } from "lucide-react";
+import { User } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { NotificationBell } from "@/components/notification-bell";
 
 export function Navbar() {
   const [email, setEmail] = useState("");
+  const [userId, setUserId] = useState<string>("");
 
   useEffect(() => {
     const fetchUser = async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
-      if (user?.email) {
-        setEmail(user.email.split("@")[0]);
+      if (user) {
+        setUserId(user.id);
+        if (user.email) {
+          setEmail(user.email.split("@")[0]);
+        }
       }
     };
     
@@ -29,10 +34,8 @@ export function Navbar() {
       </div>
 
       <div className="flex items-center space-x-4">
-        <button className="p-2 border-2 border-cronus-gray/30 hover:border-cronus-red transition-colors relative">
-          <Bell className="w-5 h-5 text-cronus-white" />
-          <span className="absolute top-0 right-0 w-2 h-2 bg-cronus-red translate-x-1 -translate-y-1 border border-cronus-surface" />
-        </button>
+        {userId && <NotificationBell userId={userId} />}
+        
         <div className="flex items-center border-2 border-cronus-gray/30 p-1 pr-4">
           <div className="w-8 h-8 bg-cronus-red flex items-center justify-center mr-3">
             <User className="w-4 h-4 text-cronus-white" />

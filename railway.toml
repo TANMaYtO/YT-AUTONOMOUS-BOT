@@ -1,0 +1,18 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python master_scheduler.py"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Mount a persistent Railway Volume at /app/models so Kokoro ONNX weights persist across redeploys
+# Also mount /app/assets so characters and backgrounds persist
+[[mounts]]
+source = "cronus-models-volume"
+destination = "/app/models"
+
+[[mounts]]
+source = "cronus-assets-volume"
+destination = "/app/assets"

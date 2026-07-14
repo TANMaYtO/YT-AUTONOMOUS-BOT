@@ -78,12 +78,26 @@ def run_upload_next():
     entry_id = pending_entry.get("id", "UNKNOWN")
     user_id = pending_entry.get("user_id")
     video_path = pending_entry.get("video_path")
+    storage_key = pending_entry.get("storage_key")
     title = pending_entry.get("title", "Untitled")
     description = pending_entry.get("description", "")
     tags = pending_entry.get("tags", [])
+    category_id = pending_entry.get("category_id", "28")
     
     logger.info(f"Found pending video: {entry_id} -> {title}")
     
+    # Download from R2 if storage_key is present or if local file doesn't exist and storage_key can be inferred
+    if storage_key or (not os.path.exists(str(video_path or "")) and os.getenv("R2_ACCOUNT_ID")):
+        s_key = storage_key or f"videos/{user_id or 'local'}/{entry_id}.mp4"
+        temp_dest = PROJECT_ROOT / "assets" / "temp" / f"{entry_id}.mp4"
+        try:
+            from agent.r2_storage import download_file_from_r2
+            download_file_from_r2(s_key, temp_dest)
+            video_path = str(temp_dest)
+            storage_key = s_key
+        except Exception as r2_e:
+            logger.warning(f"Could not download from R2 ({r2_e}), will attempt local path: {video_path}")
+
     # 4. Validates the video file
     if not video_path or not validate_video_file(video_path):
         _handle_failure(queue_data, entry_id, lock_file, f"Video validation failed for path: {video_path}", title)
@@ -108,11 +122,12 @@ def run_upload_next():
             title=title,
             description=description,
             tags=tags,
-            credentials=credentials
+            credentials=credentials,
+            category_id=category_id
         )
         
         # 7. On success: update queue, move file, log URL
-        _handle_success(queue_data, entry_id, lock_file, video_id, video_path)
+        _handle_success(queue_data, entry_id, lock_file, video_id, video_path, storage_key)
         
     except Exception as e:
         # 8. On failure: update queue, alert, exit
@@ -121,7 +136,7 @@ def run_upload_next():
         sys.exit(1)
 
 
-def _handle_success(queue_data: list, entry_id: str, lock_file: str, video_id: str, video_path: str):
+def _handle_success(queue_data: list, entry_id: str, lock_file: str, video_id: str, video_path: str, storage_key: str | None = None):
     """Handle successful upload: update queue, DELETE file to save space, sync to Supabase."""
     # Delete video file to save server storage space
     video_file = Path(video_path)
@@ -131,6 +146,15 @@ def _handle_success(queue_data: list, entry_id: str, lock_file: str, video_id: s
             logger.info(f"Deleted uploaded video to save space: {video_file}")
         except Exception as e:
             logger.error(f"Failed to delete video file {video_file}: {e}")
+            
+    # Delete from R2 if storage_key was present
+    if storage_key and os.getenv("R2_ACCOUNT_ID"):
+        try:
+            from agent.r2_storage import delete_file_from_r2
+            delete_file_from_r2(storage_key)
+            logger.info(f"Deleted video from R2 storage: {storage_key}")
+        except Exception as r2_del_err:
+            logger.error(f"Failed to delete video from R2: {r2_del_err}")
         
     # Update queue entry
     with FileLock(lock_file):

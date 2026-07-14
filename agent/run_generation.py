@@ -7,6 +7,7 @@ assigns upload slots, and pauses between runs.
 
 import asyncio
 import logging
+import os
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path

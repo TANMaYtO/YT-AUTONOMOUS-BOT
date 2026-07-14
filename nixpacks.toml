@@ -1,0 +1,12 @@
+# Nixpacks configuration for Railway deployment (alternative to Dockerfile)
+[phases.setup]
+nixPkgs = ["python310", "ffmpeg", "libgomp"]
+
+[phases.install]
+cmds = ["python -m venv /opt/venv && . /opt/venv/bin/activate && pip install --no-cache-dir -r requirements.txt"]
+
+[phases.build]
+cmds = ["mkdir -p assets/temp assets/characters assets/backgrounds assets/music models/kokoro"]
+
+[start]
+cmd = ". /opt/venv/bin/activate && python master_scheduler.py"

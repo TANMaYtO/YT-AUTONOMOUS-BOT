@@ -11,6 +11,21 @@ export default function OnboardPlanPage() {
   const handlePlanSelect = async (planType: string) => {
     setLoadingPlan(planType);
     try {
+      if (planType === "pro") {
+        const res = await fetch("/api/payments/create-checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ returnUrl: window.location.origin }),
+        });
+        const data = await res.json();
+        if (data.url) {
+          window.location.href = data.url;
+          return;
+        } else {
+          throw new Error(data.error || "Failed to create checkout session");
+        }
+      }
+
       const res = await fetch("/api/plans/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

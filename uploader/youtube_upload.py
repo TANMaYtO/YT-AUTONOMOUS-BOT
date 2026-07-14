@@ -100,9 +100,20 @@ def load_credentials_for_user(user_id: str) -> Credentials:
         try:
             creds.refresh(Request())
             logger.info(f"OAuth token refreshed successfully for user {user_id[:8]}.")
-            # We should technically save the refreshed token back to Supabase here,
-            # but for now we rely on the web frontend handling refreshes or just use the refreshed in-memory token.
-            # In Option 2, the user has to re-auth anyway.
+            # Persist the new access token back to Supabase
+            if creds.token and creds.expiry:
+                from agent.supabase_bridge import update_youtube_access_token
+                import asyncio as _asyncio
+                expiry_iso = creds.expiry.isoformat()
+                try:
+                    loop = _asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = _asyncio.new_event_loop()
+                    _asyncio.set_event_loop(loop)
+                if not loop.is_running():
+                    loop.run_until_complete(
+                        update_youtube_access_token(user_id, creds.token, expiry_iso)
+                    )
         except Exception as e:
             raise RuntimeError(
                 f"Failed to refresh OAuth token for user {user_id[:8]}: {e}\n"
@@ -170,7 +181,8 @@ def upload_video(
     title: str,
     description: str,
     tags: list[str],
-    credentials: Credentials
+    credentials: Credentials,
+    category_id: str = "28"
 ) -> str:
     """Upload video to YouTube."""
     # Truncate title to max 100 characters
@@ -184,7 +196,7 @@ def upload_video(
             "title": title,
             "description": description,
             "tags": tags,
-            "categoryId": "28", # Science & Technology
+            "categoryId": str(category_id),
         },
         "status": {
             "privacyStatus": "public",

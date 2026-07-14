@@ -105,6 +105,19 @@ async def fetch_user_config(user_id: str) -> dict[str, Any]:
     videos_per_day = cfg.get("videos_per_day") or plan.get("videos_per_day_limit", 1)
     upload_times = cfg.get("upload_times") or ["09:00"]
 
+    # Map niche to YouTube category ID
+    niche = (cfg.get("niche") or "TECH & AI").upper()
+    niche_map = {
+        "TECH & AI": "28",
+        "TECH": "28",
+        "SCIENCE": "28",
+        "GAMING": "20",
+        "ANIME": "1",
+        "FINANCE": "25",
+        "HISTORY": "27",
+    }
+    category_id = niche_map.get(niche, "24")
+
     # Build config dict in the exact format the pipeline expects
     config: dict[str, Any] = {
         "pipeline": {
@@ -113,6 +126,7 @@ async def fetch_user_config(user_id: str) -> dict[str, Any]:
             "upload_slots": upload_times,
             "tts_engine": "kokoro",
             "tts_speed": 1.0,
+            "category_id": category_id,
         },
         "characters": pipeline_characters,
         "topics": topics,
@@ -223,6 +237,8 @@ async def sync_video_to_supabase(
         "character_b": state.get("character_b"),
         "status": status,
         "scheduled_upload_time": state.get("scheduled_upload_time"),
+        "storage_key": state.get("storage_key"),
+        "video_path": str(state.get("final_video", "")) if state.get("final_video") else None,
         "error_message": state.get("error") if status == "failed" else None,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -277,3 +293,36 @@ async def mark_agent_active(user_id: str, active: bool = True) -> None:
         "last_run_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }).eq("user_id", user_id).execute()
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+async def update_youtube_access_token(
+    user_id: str,
+    new_access_token: str,
+    new_expiry_iso: str,
+) -> None:
+    """Encrypt and persist a refreshed access token back to Supabase."""
+    logger.info(f"[supabase_bridge] Writing refreshed token for {user_id[:8]}...")
+
+    key_hex = os.environ.get("TOKEN_ENCRYPTION_KEY", "").strip()
+    if not key_hex:
+        raise RuntimeError("TOKEN_ENCRYPTION_KEY must be set in .env")
+
+    import secrets
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key = bytes.fromhex(key_hex)
+    aesgcm = AESGCM(key)
+    iv = secrets.token_bytes(12)
+    ciphertext_and_tag = aesgcm.encrypt(iv, new_access_token.encode("utf-8"), None)
+    # Split: last 16 bytes are the GCM auth tag
+    ciphertext = ciphertext_and_tag[:-16]
+    auth_tag = ciphertext_and_tag[-16:]
+    encrypted = f"{iv.hex()}:{auth_tag.hex()}:{ciphertext.hex()}"
+
+    sb = get_supabase_client()
+    sb.table("youtube_connections").update({
+        "access_token": encrypted,
+        "token_expiry": new_expiry_iso,
+    }).eq("user_id", user_id).execute()
+
+    logger.info(f"[supabase_bridge] Refreshed access token persisted for {user_id[:8]}")

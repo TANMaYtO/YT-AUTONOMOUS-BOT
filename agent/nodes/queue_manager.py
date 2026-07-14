@@ -51,7 +51,23 @@ async def manage_queue(
 
         # Generate unique ID
         entry_id = str(uuid.uuid4())
-        
+        user_id = os.environ.get("USER_ID", "").strip()
+
+        # Upload to Cloudflare R2 if credentials are configured
+        storage_key = None
+        if os.getenv("R2_ACCOUNT_ID") and state.get("final_video"):
+            try:
+                from agent.r2_storage import upload_file_to_r2
+                storage_key = f"videos/{user_id or 'local'}/{entry_id}.mp4"
+                upload_file_to_r2(state["final_video"], storage_key)
+                # If in SaaS/Supabase mode, remove local video to save disk space
+                if user_id and os.path.exists(state["final_video"]):
+                    os.remove(state["final_video"])
+                    logger.info(f"[queue_manager] Deleted local file after R2 upload: {state['final_video']}")
+            except Exception as r2_err:
+                logger.error(f"[queue_manager] R2 upload failed: {r2_err}")
+                # Fall back to keeping local file if R2 upload fails
+
         project_root = Path(__file__).resolve().parent.parent.parent
         queue_file = project_root / config.get("paths", {}).get("queue", "queue.json")
         lock_file = str(queue_file) + ".lock"
@@ -61,14 +77,16 @@ async def manage_queue(
 
         new_entry = {
             "id": entry_id,
-            "user_id": os.environ.get("USER_ID", "").strip(),
+            "user_id": user_id,
             "status": "pending",
             "scheduled_upload_time": upload_dt,
             "created_at": state["created_at"],
             "video_path": state["final_video"],
+            "storage_key": storage_key,
             "title": state["title"],
             "description": state["description"],
             "tags": state.get("tags", []),
+            "category_id": config.get("pipeline", {}).get("category_id", "28"),
         }
 
         # Safe read/write
@@ -89,7 +107,7 @@ async def manage_queue(
                 json.dump(queue_data, f, indent=2)
             os.replace(temp_file, queue_file)
 
-        logger.info(f"[queue_manager] Added to queue: {entry_id} for {upload_dt}")
+        logger.info(f"[queue_manager] Added to queue: {entry_id} for {upload_dt} (R2 key: {storage_key})")
         
         # Save to history ONLY after successful generation
         from agent.history import save_history_entry
@@ -107,7 +125,8 @@ async def manage_queue(
         return {
             **state,
             "queue_entry_id": entry_id,
-            "scheduled_upload_time": upload_dt
+            "scheduled_upload_time": upload_dt,
+            "storage_key": storage_key,
         }
         
     except Exception as e:

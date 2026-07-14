@@ -47,3 +47,7 @@ supabase>=2.0
 
 # AES-GCM token decryption
 cryptography>=42.0
+
+# Cloudflare R2 (S3 compatible)
+boto3>=1.34
+

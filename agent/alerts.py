@@ -1,77 +1,110 @@
+"""In-App Notification & Alert System.
+
+Pushes real-time notifications directly to the Supabase `app_notifications` table
+so they appear instantly in the user's SaaS web dashboard via Supabase Realtime.
+Never raises exceptions — alerting must never crash the core video pipeline.
+"""
+
 import logging
 import os
-import httpx
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-async def send_telegram_alert(message: str) -> None:
-    """Send a failure alert via Telegram Bot API.
-    
-    Silently does nothing if Telegram is not configured.
-    Never raises — alerting must never crash the pipeline.
+
+async def push_app_notification(
+    type: str,
+    title: str,
+    message: str,
+    metadata: dict[str, Any] | None = None,
+    user_id: str | None = None,
+) -> None:
+    """Push a real-time notification to the user's web dashboard.
+
+    Args:
+        type: One of 'success', 'error', 'warning', 'info'.
+        title: Short title (e.g. "Pipeline Failed", "Daily Summary").
+        message: Detailed explanation or error message.
+        metadata: Optional dictionary of extra attributes (run_id, video_title, etc.).
+        user_id: Optional user UUID. Defaults to os.environ.get("USER_ID").
     """
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-    
-    if not bot_token or not chat_id:
-        logger.debug("Telegram not configured — skipping alert")
+    target_user_id = user_id or os.environ.get("USER_ID", "").strip()
+    if not target_user_id:
+        logger.debug(f"[alerts] No USER_ID found — logging locally [{type.upper()}] {title}: {message}")
         return
-    
+
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json={"chat_id": chat_id, "text": message}
-            )
-    except Exception as e:
-        logger.warning(f"Telegram alert failed to send: {e}")
+        from agent.supabase_bridge import get_supabase_client
+        sb = get_supabase_client()
+        sb.table("app_notifications").insert({
+            "user_id": target_user_id,
+            "type": type,
+            "title": title[:200],
+            "message": message[:1000],
+            "read": False,
+            "metadata": metadata or {},
+        }).execute()
+        logger.info(f"[alerts] Pushed '{title}' ({type}) to user {target_user_id[:8]}")
+    except Exception as exc:
+        logger.warning(f"[alerts] Failed to push notification to Supabase: {exc}")
+
 
 async def alert_pipeline_failure(
     run_id: str,
-    failed_node: str, 
-    error: str
+    failed_node: str,
+    error: str,
 ) -> None:
     """Send formatted pipeline failure alert."""
-    message = (
-        f"🚨 YT Shorts Agent — Pipeline Failed\n"
-        f"Run ID: {run_id}\n"
-        f"Failed at: {failed_node}\n"
-        f"Error: {error[:200]}"  # truncate long errors
+    title = f"Video Generation Failed ({failed_node})"
+    message = f"Run ID {run_id[:8]} stopped at {failed_node}: {error[:300]}"
+    await push_app_notification(
+        type="error",
+        title=title,
+        message=message,
+        metadata={"run_id": run_id, "failed_node": failed_node, "error": error},
     )
-    await send_telegram_alert(message)
+
 
 async def alert_upload_failure(
     title: str,
-    error: str
+    error: str,
 ) -> None:
     """Send formatted upload failure alert."""
-    message = (
-        f"🚨 YT Shorts Agent — Upload Failed\n"
-        f"Video: {title}\n"
-        f"Error: {error[:200]}"
+    alert_title = f"Upload Failed: {title[:30]}"
+    message = f"Could not upload video '{title}': {error[:300]}"
+    await push_app_notification(
+        type="error",
+        title=alert_title,
+        message=message,
+        metadata={"video_title": title, "error": error},
     )
-    await send_telegram_alert(message)
+
 
 async def alert_oauth_expiry(expiry_time: str) -> None:
-    """Warn when OAuth token is near expiry."""
-    message = (
-        f"⚠️ YT Shorts Agent — OAuth Warning\n"
-        f"Token expiring at: {expiry_time}\n"
-        f"Run auth_flow.py to refresh before it expires."
+    """Warn when OAuth token is near expiry or needs re-auth."""
+    title = "YouTube Connection Expiring Soon"
+    message = f"Your Google OAuth connection expires on {expiry_time}. Please reconnect via the dashboard to prevent upload interruptions."
+    await push_app_notification(
+        type="warning",
+        title=title,
+        message=message,
+        metadata={"expiry_time": expiry_time},
     )
-    await send_telegram_alert(message)
+
 
 async def alert_daily_summary(
     success_count: int,
     total: int,
-    titles: list[str]
+    titles: list[str],
 ) -> None:
     """Send daily generation summary."""
-    status = "✅" if success_count == total else "⚠️"
-    titles_str = "\n".join(f"  • {t}" for t in titles)
-    message = (
-        f"{status} YT Shorts Agent — Daily Summary\n"
-        f"Generated: {success_count}/{total} videos\n"
-        f"Videos:\n{titles_str}"
+    status_type = "success" if success_count == total else ("warning" if success_count > 0 else "error")
+    title = f"Daily Generation Complete ({success_count}/{total})"
+    titles_str = ", ".join(titles) if titles else "None"
+    message = f"Generated {success_count} of {total} scheduled videos today. Videos: {titles_str}"
+    await push_app_notification(
+        type=status_type,
+        title=title,
+        message=message,
+        metadata={"success_count": success_count, "total": total, "titles": titles},
     )
-    await send_telegram_alert(message)
