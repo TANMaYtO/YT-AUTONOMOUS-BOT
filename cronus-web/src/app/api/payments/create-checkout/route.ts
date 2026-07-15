@@ -19,13 +19,21 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { priceId, returnUrl } = body;
+    const { priceId, returnUrl, planType } = body; // planType: 'daily', 'weekly', 'monthly', 'pro'
 
-    // Check if Shopify Checkout URL is configured (or if Stripe key is placeholder)
-    const shopifyCheckoutUrl = process.env.SHOPIFY_CHECKOUT_URL || process.env.NEXT_PUBLIC_SHOPIFY_CHECKOUT_URL;
+    // Check if Shopify Checkout URL is configured for the selected tier (or fallback to general Shopify URL)
+    const tierKey = (planType || "").toUpperCase();
+    const shopifyCheckoutUrl = 
+      process.env[`SHOPIFY_CHECKOUT_URL_${tierKey}`] ||
+      process.env.SHOPIFY_CHECKOUT_URL || 
+      process.env.NEXT_PUBLIC_SHOPIFY_CHECKOUT_URL;
+
     if (shopifyCheckoutUrl && (!process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY.includes("placeholder") || process.env.USE_SHOPIFY_CHECKOUT === "true")) {
       return NextResponse.json({ url: shopifyCheckoutUrl });
     }
+
+    // Resolve tier-specific Stripe Price ID
+    const resolvedPriceId = priceId || process.env[`STRIPE_PRICE_ID_${tierKey}`] || process.env.STRIPE_PRO_PRICE_ID || "price_pro_placeholder";
 
     // Check existing customer ID from plans table
     const { data: planData } = await supabase
@@ -60,7 +68,7 @@ export async function POST(request: Request) {
       payment_method_types: ["card"],
       line_items: [
         {
-          price: priceId || process.env.STRIPE_PRO_PRICE_ID || "price_pro_placeholder",
+          price: resolvedPriceId,
           quantity: 1,
         },
       ],

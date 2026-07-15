@@ -11,11 +11,11 @@ export default function OnboardPlanPage() {
   const handlePlanSelect = async (planType: string) => {
     setLoadingPlan(planType);
     try {
-      if (planType === "pro") {
+      if (["daily", "weekly", "monthly", "pro"].includes(planType)) {
         const res = await fetch("/api/payments/create-checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ returnUrl: window.location.origin }),
+          body: JSON.stringify({ planType, returnUrl: window.location.origin }),
         });
         const data = await res.json();
         if (data.url) {

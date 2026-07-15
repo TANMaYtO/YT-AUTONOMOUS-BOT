@@ -50,22 +50,36 @@ export async function POST(request: Request) {
       return NextResponse.json({ received: true, status: financialStatus });
     }
 
-    // Check if the product purchased is Cronus Pro
+    // Check which Cronus tier was purchased: daily ($1), weekly ($5), or monthly ($25)
     const lineItems = payload.line_items || [];
-    const isProPurchase = lineItems.some(
+    let detectedTier = "pro"; // default
+    let videosLimit = 3;
+
+    const matchedItem = lineItems.find(
       (item: { title?: string; name?: string; product_id?: number }) => {
         const title = (item.title || item.name || "").toLowerCase();
-        return title.includes("pro") || title.includes("cronus");
+        return title.includes("cronus") || title.includes("daily") || title.includes("weekly") || title.includes("monthly") || title.includes("pro");
       }
     );
 
-    if (!isProPurchase) {
-      console.log("Purchased items do not include Cronus Pro plan, skipping upgrade.");
-      return NextResponse.json({ received: true, message: "Not a pro plan purchase" });
+    if (!matchedItem) {
+      console.log("Purchased items do not include Cronus subscription, skipping upgrade.");
+      return NextResponse.json({ received: true, message: "Not a Cronus subscription purchase" });
+    }
+
+    const itemTitle = (matchedItem.title || matchedItem.name || "").toLowerCase();
+    if (itemTitle.includes("daily")) {
+      detectedTier = "daily";
+      videosLimit = 1;
+    } else if (itemTitle.includes("weekly")) {
+      detectedTier = "weekly";
+      videosLimit = 3;
+    } else if (itemTitle.includes("monthly") || itemTitle.includes("industrial")) {
+      detectedTier = "monthly";
+      videosLimit = 5;
     }
 
     // Lookup user by email in Supabase auth.users using service_role RPC or plans table join
-    // First query plans or profiles table or auth users via admin API
     const { data: usersData, error: usersError } = await supabaseAdmin.auth.admin.listUsers();
     
     if (usersError || !usersData?.users) {
@@ -79,40 +93,38 @@ export async function POST(request: Request) {
 
     if (!matchingUser) {
       console.warn(`No matching Supabase user found with email: ${customerEmail}`);
-      // Note: If user purchased before signing up, we could store pending entitlement in a table,
-      // or rely on them using the same email. Here we log and return 200 so Shopify doesn't retry.
       return NextResponse.json({ received: true, message: "User account not found for email" });
     }
 
     const userId = matchingUser.id;
-    console.log(`Matching user found: ${userId} (${customerEmail}). Upgrading plan to PRO.`);
+    console.log(`Matching user found: ${userId} (${customerEmail}). Upgrading plan to ${detectedTier.toUpperCase()} (limit: ${videosLimit} videos/day).`);
 
-    // Upsert PRO plan status into plans table
+    // Upsert detected plan status into plans table
     const { error: planError } = await supabaseAdmin
       .from("plans")
       .upsert(
         {
           user_id: userId,
-          plan_type: "pro",
+          plan_type: detectedTier,
           subscription_status: "active",
-          videos_per_day_limit: 3,
+          videos_per_day_limit: videosLimit,
           started_at: new Date().toISOString(),
         },
         { onConflict: "user_id" }
       );
 
     if (planError) {
-      console.error("Failed to update user plan to PRO in database:", planError.message);
+      console.error("Failed to update user plan in database:", planError.message);
       throw planError;
     }
 
     // Also update videos_per_day limit in user_configs if row exists
     await supabaseAdmin
       .from("user_configs")
-      .update({ videos_per_day: 3 })
+      .update({ videos_per_day: videosLimit })
       .eq("user_id", userId);
 
-    console.log(`Successfully upgraded user ${userId} to PRO plan via Shopify Webhook.`);
+    console.log(`Successfully upgraded user ${userId} to ${detectedTier.toUpperCase()} plan via Shopify Webhook.`);
     return NextResponse.json({ success: true, user_id: userId, plan: "pro" });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";

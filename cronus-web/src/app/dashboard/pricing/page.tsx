@@ -9,12 +9,12 @@ export default function DashboardPricingPage() {
   const handlePlanSelect = async (planType: string) => {
     setLoadingPlan(planType);
     try {
-      if (planType === "pro") {
-        // Trigger Stripe Checkout
+      if (["daily", "weekly", "monthly", "pro"].includes(planType)) {
+        // Trigger Shopify / Stripe Checkout
         const res = await fetch("/api/payments/create-checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ returnUrl: window.location.origin }),
+          body: JSON.stringify({ planType, returnUrl: window.location.origin }),
         });
         const data = await res.json();
         if (data.url) {
@@ -25,7 +25,7 @@ export default function DashboardPricingPage() {
         }
       }
 
-      // Free plan downgrade/selection
+      // Free plan downgrade/selection (if added in future)
       const res = await fetch("/api/plans/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
