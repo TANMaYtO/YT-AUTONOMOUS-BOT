@@ -21,6 +21,12 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { priceId, returnUrl } = body;
 
+    // Check if Shopify Checkout URL is configured (or if Stripe key is placeholder)
+    const shopifyCheckoutUrl = process.env.SHOPIFY_CHECKOUT_URL || process.env.NEXT_PUBLIC_SHOPIFY_CHECKOUT_URL;
+    if (shopifyCheckoutUrl && (!process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY.includes("placeholder") || process.env.USE_SHOPIFY_CHECKOUT === "true")) {
+      return NextResponse.json({ url: shopifyCheckoutUrl });
+    }
+
     // Check existing customer ID from plans table
     const { data: planData } = await supabase
       .from("plans")
