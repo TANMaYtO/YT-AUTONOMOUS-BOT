@@ -4,7 +4,7 @@ import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder", {
-  apiVersion: "2024-06-20",
+  apiVersion: "2026-06-24.dahlia",
 });
 
 // Use service role key to bypass RLS inside webhooks
