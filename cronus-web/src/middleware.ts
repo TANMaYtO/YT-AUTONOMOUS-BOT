@@ -21,7 +21,7 @@ export async function middleware(request: NextRequest) {
   // Apply rate limiting to all API requests
   if (request.nextUrl.pathname.startsWith("/api") && rateLimiter) {
     const ip = request.headers.get("x-forwarded-for") ?? "127.0.0.1";
-    const { success, pending, limit, reset, remaining } = await rateLimiter.limit(`api_${ip}`);
+    const { success, limit, reset, remaining } = await rateLimiter.limit(`api_${ip}`);
     
     if (!success) {
       return NextResponse.json(
@@ -47,7 +47,7 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) =>
+          cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
           supabaseResponse = NextResponse.next({

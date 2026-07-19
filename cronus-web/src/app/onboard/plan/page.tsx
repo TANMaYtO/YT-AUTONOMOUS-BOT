@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+
 import { PricingPlans } from "@/components/pricing-plans";
 
 export default function OnboardPlanPage() {
-  const router = useRouter();
+
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   const handlePlanSelect = async (planType: string) => {

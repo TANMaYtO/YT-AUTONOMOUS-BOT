@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+
 import { ProgressBar } from "@/components/onboard/progress-bar";
 import { ArrowRight, X, Plus } from "lucide-react";
 
@@ -34,7 +34,7 @@ const CHARACTERS = [
 ];
 
 export default function NicheStep() {
-  const router = useRouter();
+
   const [selectedNiche, setSelectedNiche] = useState("TECH & AI");
   const [topics, setTopics] = useState<string[]>(DEFAULT_TOPICS["TECH & AI"]);
   const [customTopic, setCustomTopic] = useState("");

@@ -15,7 +15,7 @@ export function ProgressBar({ currentStep }: ProgressBarProps) {
         YOUTUBE {currentStep === 1 && <span className="ml-2 animate-pulse">_</span>}
       </div>
 
-      <div className="text-cronus-gray/30">//</div>
+      <div className="text-cronus-gray/30">{"//"}</div>
 
       {/* STEP 2 */}
       <div className={`flex items-center ${currentStep === 2 ? "text-cronus-red font-bold" : currentStep > 2 ? "text-cronus-white" : "text-cronus-gray"}`}>
@@ -25,7 +25,7 @@ export function ProgressBar({ currentStep }: ProgressBarProps) {
         NICHE {currentStep === 2 && <span className="ml-2 animate-pulse">_</span>}
       </div>
 
-      <div className="text-cronus-gray/30">//</div>
+      <div className="text-cronus-gray/30">{"//"}</div>
 
       {/* STEP 3 */}
       <div className={`flex items-center ${currentStep === 3 ? "text-cronus-red font-bold" : "text-cronus-gray"}`}>
