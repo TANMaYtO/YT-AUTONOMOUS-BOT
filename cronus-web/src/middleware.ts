@@ -4,8 +4,13 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
 // Initialize rate limiter if Upstash vars are configured
+const isUpstashConfigured = 
+  process.env.UPSTASH_REDIS_REST_URL && 
+  process.env.UPSTASH_REDIS_REST_URL.startsWith("http") &&
+  process.env.UPSTASH_REDIS_REST_TOKEN;
+
 const rateLimiter =
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  isUpstashConfigured
     ? new Ratelimit({
         redis: Redis.fromEnv(),
         limiter: Ratelimit.slidingWindow(30, "60 s"),
